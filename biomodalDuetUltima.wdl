@@ -8,7 +8,7 @@ workflow biomodalDuetUltima {
         String outputFileNamePrefix
         String mode = "6bp"
         String additionalProfile = "deep_seq"
-        String modules = "biomodal-duet-ultima/1.7.0a1"
+        String modules = ""
     }
 
     parameter_meta {
@@ -147,6 +147,7 @@ task runDuet {
         Boolean callGermlineVariants = true
         String variantCaller    = "deepvariant"
         Int    maxCpus          = 30
+        Int    maxMemory        = 64
         Int    jobMemory        = 16
         Int    timeout          = 96
     }
@@ -168,6 +169,7 @@ task runDuet {
         callGermlineVariants: "Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)"
         variantCaller:        "Germline variant caller: deepvariant (Ultima-trained model), gatk, or both"
         maxCpus:              "Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes."
+        maxMemory:            "Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes."
         jobMemory:            "Memory in GB for the head (Nextflow driver) task"
         timeout:              "Timeout in hours"
     }
@@ -184,6 +186,7 @@ task runDuet {
         mkdir -p biomodal_instance
         module use /.mounts/labs/gsiprojects/gsi/gsiusers/gpeng/modules/local/gsi/modulator/modulefiles/Ubuntu20.04
         module load biomodal-duet-ultima/1.7.0a1
+
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/cli_config.yaml" ./biomodal_instance/cli_config.yaml
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/nextflow_override.config" ./biomodal_instance/nextflow_override.config
         chmod 770 ./biomodal_instance/cli_config.yaml ./biomodal_instance/nextflow_override.config
@@ -191,6 +194,43 @@ task runDuet {
         cp -rL "$BIOMODAL_INSTANCE_DIR/pipelines" ./biomodal_instance/pipelines
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
+
+        # ---------------------------------------------------------------------------
+        # 1b. Patch bwa_mem2.nf for the biomodal @PG-header bug. bwa-mem2 writes its
+        #     tab-delimited -R read group into the @PG CL: field, producing a
+        #     malformed SAM header (duplicate ID tags) that crashes QUALIMAP_BAMQC
+        #     under fail_fast. biomodal's default 'ignore' error strategy hides it, so
+        #     an upstream fix is unlikely soon; patching the copied (writable) pipeline
+        #     tree here keeps the fix applied automatically across module rebuilds and
+        #     version bumps -- unlike a module-source hotfix, which is lost on every
+        #     fresh biomodal download. Idempotent (skips if already patched); exits
+        #     non-zero if the anchor is gone, so an upstream restructure is caught
+        #     loudly instead of silently reverting to the broken behaviour.
+        # ---------------------------------------------------------------------------
+        BWA_NF="${INSTANCE_DIR}/pipelines/duet/1.7.0a1/modules/bwa_mem2.nf" python3 <<'PYEOF'
+import os, sys, pathlib
+p = pathlib.Path(os.environ["BWA_NF"])
+text = p.read_text()
+marker = "OICR hotfix (biomodal @PG bug)"
+anchor = "      samtools index -@"
+if marker in text:
+    print("bwa_mem2.nf: @PG hotfix already present, skipping")
+elif anchor in text:
+    insert = r'''      # --- OICR hotfix (biomodal @PG bug): bwa-mem2 writes its tab-delimited
+      # -R read group into the @PG CL: field, corrupting the SAM header (duplicate
+      # ID tags) and crashing qualimap. Collapse the tabs inside @PG CL: to spaces.
+      samtools view -H ${bam_file_tag}.bam | sed '/^@PG/{:a; s/\\(CL:.*\\)\\t/\\1 /; ta}' > fixed_header.sam
+      samtools reheader fixed_header.sam ${bam_file_tag}.bam > reheadered.bam && mv reheadered.bam ${bam_file_tag}.bam
+
+'''
+    text = text.replace(anchor, insert + anchor, 1)
+    p.write_text(text)
+    print("bwa_mem2.nf: applied @PG hotfix")
+else:
+    sys.stderr.write("ERROR: bwa_mem2.nf anchor '%s' not found; @PG hotfix NOT applied.\n" % anchor)
+    sys.stderr.write("       biomodal may have restructured the module -- re-verify the fix.\n")
+    sys.exit(1)
+PYEOF
 
         # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
@@ -220,13 +260,21 @@ CLIEOF
         # ---------------------------------------------------------------------------
 
         # 3a. Point the apptainer image cache at the shared module images dir so
-        #     containers are pulled once and reused (env-var expanded here).
+        #     containers are pulled once and reused. runOptions replaces the
+        #     biomodal-shipped one: keep the $TMPDIR->/tmp bind, and additionally
+        #     force TMPDIR=/tmp INSIDE the container. Without this, the config
+        #     whitelists the host $TMPDIR (e.g. /tmp/<jobid>.<q>) into the container
+        #     while the bind puts its contents at /tmp, so tools that honour $TMPDIR
+        #     (e.g. GNU parallel in HAPLOTYPE_CALLER) look for a path that does not
+        #     exist in the container and fail. $TMPDIR is escaped so it is evaluated
+        #     per-task on the exec node, not expanded here. (env-var expanded here.)
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 // ---- OICR WDL runtime patches (env-var expanded) ----
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${BIOMODAL_IMAGES_DIR}"
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp'
 }
 NFEOF
 
@@ -280,6 +328,27 @@ process {
 }
 NFEOF
         fi
+
+        # 3d. Clamp per-process memory to maxMemory. The heavy steps hardcode
+        #     32-64GB; a 64GB h_vmem request only fits the scarce big all.q nodes
+        #     (the common ~62GB nodes cannot satisfy it) and can sit in 'qw' for
+        #     hours, while smaller requests schedule on the plentiful small nodes
+        #     (this is why PRELUDE at 32GB ran but BWA_MEM2 at 64GB stalled). Only
+        #     REDUCE (min with each step's base), so the default 64 is a no-op that
+        #     preserves production memory; lower maxMemory for test runs.
+        {
+            echo ""
+            echo "process {"
+            for spec in "BWA_MEM2:64" "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
+                        "GENOMICS_DB_IMPORT:64" "DEEPVARIANT_CALLER:64" \
+                        "PRELUDE:32" "PRELUDE_ULTIMA:32" "BIOMODAL_COLLAPSE:32"; do
+                pname="${spec%%:*}"; base="${spec##*:}"
+                if [ "${base}" -gt "~{maxMemory}" ]; then
+                    echo "    withName: '${pname}' { memory = '~{maxMemory}GB' }"
+                fi
+            done
+            echo "}"
+        } >> "${INSTANCE_DIR}/nextflow_override.config"
 
         # ---------------------------------------------------------------------------
         # 4. qsub shim (cgroup memory-kill fix).
