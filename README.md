@@ -48,6 +48,7 @@ Parameter|Value|Default|Description
 `runDuet.callGermlineVariants`|Boolean|true|Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)
 `runDuet.variantCaller`|String|"deepvariant"|Germline variant caller: deepvariant (Ultima-trained model), gatk, or both
 `runDuet.maxCpus`|Int|30|Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes.
+`runDuet.maxMemory`|Int|64|Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes.
 `runDuet.jobMemory`|Int|16|Memory in GB for the head (Nextflow driver) task
 `runDuet.timeout`|Int|96|Timeout in hours
 
@@ -88,8 +89,7 @@ This section lists command(s) run by biomodalDuetUltima workflow
         #    directives, which nextflow.config uses heavily. 
         # ---------------------------------------------------------------------------
         mkdir -p biomodal_instance
-        module use /.mounts/labs/gsiprojects/gsi/gsiusers/gpeng/modules/local/gsi/modulator/modulefiles/Ubuntu20.04
-        module load biomodal-duet-ultima/1.7.0a1
+
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/cli_config.yaml" ./biomodal_instance/cli_config.yaml
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/nextflow_override.config" ./biomodal_instance/nextflow_override.config
         chmod 770 ./biomodal_instance/cli_config.yaml ./biomodal_instance/nextflow_override.config
@@ -97,6 +97,37 @@ This section lists command(s) run by biomodalDuetUltima workflow
         cp -rL "$BIOMODAL_INSTANCE_DIR/pipelines" ./biomodal_instance/pipelines
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
+
+        # ---------------------------------------------------------------------------
+        # 1b. Patch bwa_mem2.nf for the biomodal @PG-header bug. bwa-mem2 writes its
+        #     tab-delimited -R read group into the @PG CL: field, producing a
+        #     malformed SAM header (duplicate ID tags) that crashes QUALIMAP_BAMQC
+        #     under fail_fast. 
+        # ---------------------------------------------------------------------------
+        BWA_NF="${INSTANCE_DIR}/pipelines/duet/1.7.0a1/modules/bwa_mem2.nf" python3 <<'PYEOF'
+import os, sys, pathlib
+p = pathlib.Path(os.environ["BWA_NF"])
+text = p.read_text()
+marker = "OICR hotfix (biomodal @PG bug)"
+anchor = "      samtools index -@"
+if marker in text:
+    print("bwa_mem2.nf: @PG hotfix already present, skipping")
+elif anchor in text:
+    insert = r'''      # --- OICR hotfix (biomodal @PG bug): bwa-mem2 writes its tab-delimited
+      # -R read group into the @PG CL: field, corrupting the SAM header (duplicate
+      # ID tags) and crashing qualimap. Collapse the tabs inside @PG CL: to spaces.
+      samtools view -H ${bam_file_tag}.bam | sed '/^@PG/{:a; s/\\(CL:.*\\)\\t/\\1 /; ta}' > fixed_header.sam
+      samtools reheader fixed_header.sam ${bam_file_tag}.bam > reheadered.bam && mv reheadered.bam ${bam_file_tag}.bam
+
+'''
+    text = text.replace(anchor, insert + anchor, 1)
+    p.write_text(text)
+    print("bwa_mem2.nf: applied @PG hotfix")
+else:
+    sys.stderr.write("ERROR: bwa_mem2.nf anchor '%s' not found; @PG hotfix NOT applied.\n" % anchor)
+    sys.stderr.write("       biomodal may have restructured the module -- re-verify the fix.\n")
+    sys.exit(1)
+PYEOF
 
         # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
@@ -126,13 +157,16 @@ CLIEOF
         # ---------------------------------------------------------------------------
 
         # 3a. Point the apptainer image cache at the shared module images dir so
-        #     containers are pulled once and reused (env-var expanded here).
+        #     containers are pulled once and reused. runOptions replaces the
+        #     biomodal-shipped one: keep the $TMPDIR->/tmp bind, and additionally
+        #     force TMPDIR=/tmp INSIDE the container. 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 // ---- OICR WDL runtime patches (env-var expanded) ----
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${BIOMODAL_IMAGES_DIR}"
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp'
 }
 NFEOF
 
@@ -155,18 +189,7 @@ process {
 }
 NFEOF
 
-        # 3c. Clamp per-process cpus that exceed OICR's max smp slots. all.q offers
-        #     at most 39 slots per node (31 on default nodes, 39 on 40-core
-        #     hostgroups, 23 on 24-core); a request above a node's slot count sits
-        #     in 'qw' forever. Two groups need capping to ~{maxCpus}:
-        #      - PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER
-        #        hardcode 'cpus 32' in their .nf, so they exceed the 31-slot default
-        #        nodes in EVERY tier -> clamp unconditionally.
-        #      - BWA_MEM2, MUTECT2 are small at base but the deep_seq/super_seq
-        #        profiles push them to 32/64 -> clamp only when a profile is active
-        #        (forcing their small base value up would be counterproductive).
-        #     Memory needs no clamp: all.q has 256-768GB big-memory nodes that
-        #     satisfy the 128GB dedup steps.
+        # 3c. Clamp per-process cpus that exceed OICR's max smp slots.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 process {
@@ -186,6 +209,21 @@ process {
 }
 NFEOF
         fi
+
+        # 3d. Clamp per-process memory to maxMemory. 
+        {
+            echo ""
+            echo "process {"
+            for spec in "BWA_MEM2:64" "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
+                        "GENOMICS_DB_IMPORT:64" "DEEPVARIANT_CALLER:64" \
+                        "PRELUDE:32" "PRELUDE_ULTIMA:32" "BIOMODAL_COLLAPSE:32"; do
+                pname="${spec%%:*}"; base="${spec##*:}"
+                if [ "${base}" -gt "~{maxMemory}" ]; then
+                    echo "    withName: '${pname}' { memory = '~{maxMemory}GB' }"
+                fi
+            done
+            echo "}"
+        } >> "${INSTANCE_DIR}/nextflow_override.config"
 
         # ---------------------------------------------------------------------------
         # 4. qsub shim (cgroup memory-kill fix).
@@ -227,12 +265,6 @@ SHIMEOF
 
         # ---------------------------------------------------------------------------
         # 5. Writable NXF_HOME, pre-seeded with the bundled Nextflow framework jar.
-        #    The biomodal CLI bootstraps the Nextflow engine (nextflow-<ver>-one.jar)
-        #    on run; on an offline exec node it cannot download it (curl 403). The
-        #    module must therefore ship the jar under pipelines/duet/1.7.0a1/; we
-        #    copy it into $NXF_HOME/framework/<ver>/ (where the launcher looks before
-        #    downloading). If it is missing we fail fast here with a clear message
-        #    rather than letting the CLI hit the network and emit an opaque 403.
         # ---------------------------------------------------------------------------
         export NXF_HOME="$(pwd)/nxf_home"
         export NXF_OPTS="-Xms512m -Xmx8g"
@@ -275,21 +307,13 @@ SHIMEOF
         # ---------------------------------------------------------------------------
         # 7. Run biomodal DUET in Ultima mode.
         #    reference_path is <ref_data>/<ref_pipeline_version>_<ref_genome> =
-        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy (same convention as the
-        #    v1.5.0 WDL's 1.0.5_GRCh38Decoy). The pipeline reads TSS/prelude/
-        #    deepvariant/blacklist from $reference_path/duet/... and the genome /
-        #    control references from $reference_path/duet/duet-ref-1.1.0/... .
-        #    ultima_cram_input / ultima_single_end_input / override_sequencer /
-        #    input_file_pattern are the required Ultima flags.
+        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy 
         # ---------------------------------------------------------------------------
         mkdir -p nf-results
         REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
 
         # Fail fast if DeepVariant germline calling is requested but its Ultima model
-        # is absent from the reference bundle. The pipeline passes the model path
-        # straight to run_deepvariant (no startup file-existence check), so without
-        # this guard a missing model would only surface after hours of alignment and
-        # quantification. Add the model under
+        # is absent from the reference bundle.  Add the model under
         # ${REFERENCE_PATH}/duet/deepvariant/ultima_model/, set variantCaller=gatk, or
         # set callGermlineVariants=false.
         if [ "~{callGermlineVariants}" = "true" ] && \
@@ -309,10 +333,7 @@ SHIMEOF
             PROFILE_ARGS=(--additional-profile "${ADDITIONAL_PROFILE}")
         fi
 
-        # Resolve the biomodal CLI. It is NOT part of the downloaded pipeline files;
-        # the module bundles it inside the instance dir ($BIOMODAL_INSTANCE_DIR/
-        # biomodal). Prefer that, fall back to PATH (in case a future module puts it
-        # there instead), and fail loudly if neither is found.
+        # Resolve the biomodal CLI. 
         if [ -x "$BIOMODAL_INSTANCE_DIR/biomodal" ]; then
             BIOMODAL="$BIOMODAL_INSTANCE_DIR/biomodal"
         elif command -v biomodal >/dev/null 2>&1; then

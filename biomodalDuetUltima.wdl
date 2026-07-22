@@ -8,28 +8,28 @@ workflow biomodalDuetUltima {
         String outputFileNamePrefix
         String mode = "6bp"
         String additionalProfile = "deep_seq"
-        String modules = ""
+        String modules = "biomodal-duet-ultima/1.7.0a1"
     }
 
     parameter_meta {
-        crams:                "Array of unaligned Ultima single-read CRAM files (one per lane) for a single sample"
-        sampleId:             "Sample identifier (used for naming input CRAMs and output files)"
-        runName:              "Sequencing run name / identifier (used in report file names)"
+        crams: "Array of unaligned Ultima single-read CRAM files (one per lane) for a single sample"
+        sampleId: "Sample identifier (used for naming input CRAMs and output files)"
+        runName: "Sequencing run name / identifier (used in report file names)"
         outputFileNamePrefix: "Prefix for all output file names"
-        mode:                 "Biomodal DUET mode: 6bp (duet evoC) or 5bp (duet +modC). Default: 6bp"
-        additionalProfile:    "Nextflow resource profile: deep_seq (<=500M reads), super_seq (>500M reads), or empty (<=50M reads). Default: deep_seq"
-        modules:              "Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)"
+        mode: "Biomodal DUET mode: 6bp (duet evoC) or 5bp (duet +modC). Default: 6bp"
+        additionalProfile: "Nextflow resource profile: deep_seq (<=500M reads), super_seq (>500M reads), or empty (<=50M reads). Default: deep_seq"
+        modules: "Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)"
     }
 
     call runDuet {
         input:
-            crams                = crams,
-            sampleId             = sampleId,
-            runName              = runName,
+            crams = crams,
+            sampleId = sampleId,
+            runName  = runName,
             outputFileNamePrefix = outputFileNamePrefix,
-            mode                 = mode,
-            additionalProfile    = additionalProfile,
-            modules              = modules
+            mode = mode,
+            additionalProfile = additionalProfile,
+            modules = modules
     }
 
     meta {
@@ -107,21 +107,21 @@ workflow biomodalDuetUltima {
     }
 
     output {
-        File    outputBam          = runDuet.outputBam
-        File    outputBai          = runDuet.outputBai
-        File    hmc_cxreport       = runDuet.hmc_cxreport
-        File    hmc_cxreportIndex  = runDuet.hmc_cxreportIndex
-        File    mc_cxreport        = runDuet.mc_cxreport
-        File    mc_cxreportIndex   = runDuet.mc_cxreportIndex
-        File    modc_cxreport      = runDuet.modc_cxreport
-        File    modc_cxreportIndex = runDuet.modc_cxreportIndex
-        File?   vcf                = runDuet.vcf
-        File?   vcfIndex           = runDuet.vcfIndex
-        File    summaryCsv         = runDuet.summaryCsv
-        File    summaryHtml        = runDuet.summaryHtml
-        File    summaryXlsx        = runDuet.summaryXlsx
-        File    multiqcReport      = runDuet.multiqcReport
-        File    metricsDefinitions = runDuet.metricsDefinitions
+        File  outputBam = runDuet.outputBam
+        File  outputBai = runDuet.outputBai
+        File  hmc_cxreport = runDuet.hmc_cxreport
+        File  hmc_cxreportIndex = runDuet.hmc_cxreportIndex
+        File  mc_cxreport = runDuet.mc_cxreport
+        File  mc_cxreportIndex = runDuet.mc_cxreportIndex
+        File  modc_cxreport = runDuet.modc_cxreport
+        File  modc_cxreportIndex = runDuet.modc_cxreportIndex
+        File? vcf = runDuet.vcf
+        File? vcfIndex = runDuet.vcfIndex
+        File  summaryCsv = runDuet.summaryCsv
+        File  summaryHtml = runDuet.summaryHtml
+        File  summaryXlsx = runDuet.summaryXlsx
+        File  multiqcReport = runDuet.multiqcReport
+        File  metricsDefinitions = runDuet.metricsDefinitions
     }
 }
 
@@ -134,44 +134,41 @@ task runDuet {
         String mode
         String additionalProfile
         String modules
-        # Ultima recommended quality-filtering / trimming parameters (see
-        # duet_on_Ultima_early_access_instructions_1-7-0a1). Defaults are the
-        # biomodal-recommended values chosen to maximise recovered reads.
-        Int    hpMinOverlap     = 10
-        Float  hpMaxErrorRate   = 0.2
-        Int    frontQualityTrim = 15
-        Int    backQualityTrim  = 15
-        Int    meanQualityR1    = 15
-        Int    meanQualityR2    = 15
-        Int    maskEndCs        = 5
+        Int hpMinOverlap = 10
+        Float hpMaxErrorRate = 0.2
+        Int frontQualityTrim = 15
+        Int backQualityTrim = 15
+        Int meanQualityR1 = 15
+        Int meanQualityR2 = 15
+        Int maskEndCs  = 5
         Boolean callGermlineVariants = true
-        String variantCaller    = "deepvariant"
-        Int    maxCpus          = 30
-        Int    maxMemory        = 64
-        Int    jobMemory        = 16
-        Int    timeout          = 96
+        String variantCaller = "deepvariant"
+        Int maxCpus = 30
+        Int maxMemory = 64
+        Int jobMemory = 16
+        Int timeout = 96
     }
     parameter_meta {
-        crams:                "Array of unaligned Ultima single-read CRAM files (one per lane) for a single sample"
-        sampleId:             "Sample identifier (used for naming input CRAMs and output files)"
-        runName:              "Sequencing run name / identifier (used in report file names)"
+        crams: "Array of unaligned Ultima single-read CRAM files (one per lane) for a single sample"
+        sampleId: "Sample identifier (used for naming input CRAMs and output files)"
+        runName: "Sequencing run name / identifier (used in report file names)"
         outputFileNamePrefix: "Prefix for all output file names"
-        mode:                 "Biomodal DUET mode: 6bp (duet evoC) or 5bp (duet +modC)"
-        additionalProfile:    "Nextflow resource profile (deep_seq, super_seq, or empty)"
-        modules:              "Environment module providing the biomodal instance dir and its env vars"
-        hpMinOverlap:         "prelude.hp_min_overlap: overlap of the hairpin required to identify and remove it"
-        hpMaxErrorRate:       "prelude.hp_max_error_rate: error rate tolerated when identifying hairpin sequences for removal"
-        frontQualityTrim:     "prelude.front_quality_trim: minimum quality below which bases are trimmed from the start of reads"
-        backQualityTrim:      "prelude.back_quality_trim: minimum quality below which bases are trimmed from the end of reads"
-        meanQualityR1:        "prelude.mean_quality_R1: minimum mean quality below which an R1 read is discarded"
-        meanQualityR2:        "prelude.mean_quality_R2: minimum mean quality below which an R2 read is discarded"
-        maskEndCs:            "prelude.mask_end_cs: mask Cs in the last n bases at the tail of reads to improve methylation-calling sensitivity"
+        mode: "Biomodal DUET mode: 6bp (duet evoC) or 5bp (duet +modC)"
+        additionalProfile: "Nextflow resource profile (deep_seq, super_seq, or empty)"
+        modules: "Environment module providing the biomodal instance dir and its env vars"
+        hpMinOverlap: "prelude.hp_min_overlap: overlap of the hairpin required to identify and remove it"
+        hpMaxErrorRate: "prelude.hp_max_error_rate: error rate tolerated when identifying hairpin sequences for removal"
+        frontQualityTrim: "prelude.front_quality_trim: minimum quality below which bases are trimmed from the start of reads"
+        backQualityTrim: "prelude.back_quality_trim: minimum quality below which bases are trimmed from the end of reads"
+        meanQualityR1: "prelude.mean_quality_R1: minimum mean quality below which an R1 read is discarded"
+        meanQualityR2: "prelude.mean_quality_R2: minimum mean quality below which an R2 read is discarded"
+        maskEndCs: "prelude.mask_end_cs: mask Cs in the last n bases at the tail of reads to improve methylation-calling sensitivity"
         callGermlineVariants: "Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)"
-        variantCaller:        "Germline variant caller: deepvariant (Ultima-trained model), gatk, or both"
-        maxCpus:              "Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes."
-        maxMemory:            "Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes."
-        jobMemory:            "Memory in GB for the head (Nextflow driver) task"
-        timeout:              "Timeout in hours"
+        variantCaller: "Germline variant caller: deepvariant (Ultima-trained model), gatk, or both"
+        maxCpus: "Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes."
+        maxMemory: "Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes."
+        jobMemory: "Memory in GB for the head (Nextflow driver) task"
+        timeout: "Timeout in hours"
     }
 
     command <<<
@@ -184,8 +181,6 @@ task runDuet {
         #    directives, which nextflow.config uses heavily. 
         # ---------------------------------------------------------------------------
         mkdir -p biomodal_instance
-        module use /.mounts/labs/gsiprojects/gsi/gsiusers/gpeng/modules/local/gsi/modulator/modulefiles/Ubuntu20.04
-        module load biomodal-duet-ultima/1.7.0a1
 
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/cli_config.yaml" ./biomodal_instance/cli_config.yaml
         cp -L --remove-destination "$BIOMODAL_INSTANCE_DIR/nextflow_override.config" ./biomodal_instance/nextflow_override.config
@@ -199,13 +194,7 @@ task runDuet {
         # 1b. Patch bwa_mem2.nf for the biomodal @PG-header bug. bwa-mem2 writes its
         #     tab-delimited -R read group into the @PG CL: field, producing a
         #     malformed SAM header (duplicate ID tags) that crashes QUALIMAP_BAMQC
-        #     under fail_fast. biomodal's default 'ignore' error strategy hides it, so
-        #     an upstream fix is unlikely soon; patching the copied (writable) pipeline
-        #     tree here keeps the fix applied automatically across module rebuilds and
-        #     version bumps -- unlike a module-source hotfix, which is lost on every
-        #     fresh biomodal download. Idempotent (skips if already patched); exits
-        #     non-zero if the anchor is gone, so an upstream restructure is caught
-        #     loudly instead of silently reverting to the broken behaviour.
+        #     under fail_fast. 
         # ---------------------------------------------------------------------------
         BWA_NF="${INSTANCE_DIR}/pipelines/duet/1.7.0a1/modules/bwa_mem2.nf" python3 <<'PYEOF'
 import os, sys, pathlib
@@ -262,12 +251,7 @@ CLIEOF
         # 3a. Point the apptainer image cache at the shared module images dir so
         #     containers are pulled once and reused. runOptions replaces the
         #     biomodal-shipped one: keep the $TMPDIR->/tmp bind, and additionally
-        #     force TMPDIR=/tmp INSIDE the container. Without this, the config
-        #     whitelists the host $TMPDIR (e.g. /tmp/<jobid>.<q>) into the container
-        #     while the bind puts its contents at /tmp, so tools that honour $TMPDIR
-        #     (e.g. GNU parallel in HAPLOTYPE_CALLER) look for a path that does not
-        #     exist in the container and fail. $TMPDIR is escaped so it is evaluated
-        #     per-task on the exec node, not expanded here. (env-var expanded here.)
+        #     force TMPDIR=/tmp INSIDE the container. 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 // ---- OICR WDL runtime patches (env-var expanded) ----
@@ -297,18 +281,7 @@ process {
 }
 NFEOF
 
-        # 3c. Clamp per-process cpus that exceed OICR's max smp slots. all.q offers
-        #     at most 39 slots per node (31 on default nodes, 39 on 40-core
-        #     hostgroups, 23 on 24-core); a request above a node's slot count sits
-        #     in 'qw' forever. Two groups need capping to ~{maxCpus}:
-        #      - PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER
-        #        hardcode 'cpus 32' in their .nf, so they exceed the 31-slot default
-        #        nodes in EVERY tier -> clamp unconditionally.
-        #      - BWA_MEM2, MUTECT2 are small at base but the deep_seq/super_seq
-        #        profiles push them to 32/64 -> clamp only when a profile is active
-        #        (forcing their small base value up would be counterproductive).
-        #     Memory needs no clamp: all.q has 256-768GB big-memory nodes that
-        #     satisfy the 128GB dedup steps.
+        # 3c. Clamp per-process cpus that exceed OICR's max smp slots.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 process {
@@ -329,13 +302,7 @@ process {
 NFEOF
         fi
 
-        # 3d. Clamp per-process memory to maxMemory. The heavy steps hardcode
-        #     32-64GB; a 64GB h_vmem request only fits the scarce big all.q nodes
-        #     (the common ~62GB nodes cannot satisfy it) and can sit in 'qw' for
-        #     hours, while smaller requests schedule on the plentiful small nodes
-        #     (this is why PRELUDE at 32GB ran but BWA_MEM2 at 64GB stalled). Only
-        #     REDUCE (min with each step's base), so the default 64 is a no-op that
-        #     preserves production memory; lower maxMemory for test runs.
+        # 3d. Clamp per-process memory to maxMemory. 
         {
             echo ""
             echo "process {"
@@ -390,12 +357,6 @@ SHIMEOF
 
         # ---------------------------------------------------------------------------
         # 5. Writable NXF_HOME, pre-seeded with the bundled Nextflow framework jar.
-        #    The biomodal CLI bootstraps the Nextflow engine (nextflow-<ver>-one.jar)
-        #    on run; on an offline exec node it cannot download it (curl 403). The
-        #    module must therefore ship the jar under pipelines/duet/1.7.0a1/; we
-        #    copy it into $NXF_HOME/framework/<ver>/ (where the launcher looks before
-        #    downloading). If it is missing we fail fast here with a clear message
-        #    rather than letting the CLI hit the network and emit an opaque 403.
         # ---------------------------------------------------------------------------
         export NXF_HOME="$(pwd)/nxf_home"
         export NXF_OPTS="-Xms512m -Xmx8g"
@@ -438,21 +399,13 @@ SHIMEOF
         # ---------------------------------------------------------------------------
         # 7. Run biomodal DUET in Ultima mode.
         #    reference_path is <ref_data>/<ref_pipeline_version>_<ref_genome> =
-        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy (same convention as the
-        #    v1.5.0 WDL's 1.0.5_GRCh38Decoy). The pipeline reads TSS/prelude/
-        #    deepvariant/blacklist from $reference_path/duet/... and the genome /
-        #    control references from $reference_path/duet/duet-ref-1.1.0/... .
-        #    ultima_cram_input / ultima_single_end_input / override_sequencer /
-        #    input_file_pattern are the required Ultima flags.
+        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy 
         # ---------------------------------------------------------------------------
         mkdir -p nf-results
         REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
 
         # Fail fast if DeepVariant germline calling is requested but its Ultima model
-        # is absent from the reference bundle. The pipeline passes the model path
-        # straight to run_deepvariant (no startup file-existence check), so without
-        # this guard a missing model would only surface after hours of alignment and
-        # quantification. Add the model under
+        # is absent from the reference bundle.  Add the model under
         # ${REFERENCE_PATH}/duet/deepvariant/ultima_model/, set variantCaller=gatk, or
         # set callGermlineVariants=false.
         if [ "~{callGermlineVariants}" = "true" ] && \
@@ -472,10 +425,7 @@ SHIMEOF
             PROFILE_ARGS=(--additional-profile "${ADDITIONAL_PROFILE}")
         fi
 
-        # Resolve the biomodal CLI. It is NOT part of the downloaded pipeline files;
-        # the module bundles it inside the instance dir ($BIOMODAL_INSTANCE_DIR/
-        # biomodal). Prefer that, fall back to PATH (in case a future module puts it
-        # there instead), and fail loudly if neither is found.
+        # Resolve the biomodal CLI. 
         if [ -x "$BIOMODAL_INSTANCE_DIR/biomodal" ]; then
             BIOMODAL="$BIOMODAL_INSTANCE_DIR/biomodal"
         elif command -v biomodal >/dev/null 2>&1; then
@@ -586,20 +536,20 @@ SHIMEOF
     }
 
     output {
-        File    outputBam          = "~{outputFileNamePrefix}.bam"
-        File    outputBai          = "~{outputFileNamePrefix}.bam.bai"
-        File    hmc_cxreport       = "~{outputFileNamePrefix}.hmc_cxreport.txt.gz"
-        File    hmc_cxreportIndex  = "~{outputFileNamePrefix}.hmc_cxreport.txt.gz.tbi"
-        File    mc_cxreport        = "~{outputFileNamePrefix}.mc_cxreport.txt.gz"
-        File    mc_cxreportIndex   = "~{outputFileNamePrefix}.mc_cxreport.txt.gz.tbi"
-        File    modc_cxreport      = "~{outputFileNamePrefix}.modc_cxreport.txt.gz"
-        File    modc_cxreportIndex = "~{outputFileNamePrefix}.modc_cxreport.txt.gz.tbi"
-        File?   vcf                = "~{outputFileNamePrefix}.vcf.gz"
-        File?   vcfIndex           = "~{outputFileNamePrefix}.vcf.gz.tbi"
-        File    summaryCsv         = "~{outputFileNamePrefix}.summary.csv"
-        File    summaryHtml        = "~{outputFileNamePrefix}.summary.html"
-        File    summaryXlsx        = "~{outputFileNamePrefix}.summary.xlsx"
-        File    multiqcReport      = "~{outputFileNamePrefix}.multiqc_report.html"
-        File    metricsDefinitions = "~{outputFileNamePrefix}.metrics_definitions.csv"
+        File  outputBam = "~{outputFileNamePrefix}.bam"
+        File  outputBai = "~{outputFileNamePrefix}.bam.bai"
+        File  hmc_cxreport = "~{outputFileNamePrefix}.hmc_cxreport.txt.gz"
+        File  hmc_cxreportIndex  = "~{outputFileNamePrefix}.hmc_cxreport.txt.gz.tbi"
+        File  mc_cxreport = "~{outputFileNamePrefix}.mc_cxreport.txt.gz"
+        File  mc_cxreportIndex = "~{outputFileNamePrefix}.mc_cxreport.txt.gz.tbi"
+        File  modc_cxreport  = "~{outputFileNamePrefix}.modc_cxreport.txt.gz"
+        File  modc_cxreportIndex = "~{outputFileNamePrefix}.modc_cxreport.txt.gz.tbi"
+        File? vcf = "~{outputFileNamePrefix}.vcf.gz"
+        File? vcfIndex = "~{outputFileNamePrefix}.vcf.gz.tbi"
+        File  summaryCsv = "~{outputFileNamePrefix}.summary.csv"
+        File  summaryHtml = "~{outputFileNamePrefix}.summary.html"
+        File  summaryXlsx = "~{outputFileNamePrefix}.summary.xlsx"
+        File  multiqcReport = "~{outputFileNamePrefix}.multiqc_report.html"
+        File  metricsDefinitions = "~{outputFileNamePrefix}.metrics_definitions.csv"
     }
 }
