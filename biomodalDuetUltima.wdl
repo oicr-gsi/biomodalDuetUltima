@@ -8,7 +8,7 @@ workflow biomodalDuetUltima {
         String outputFileNamePrefix
         String mode = "6bp"
         String additionalProfile = "deep_seq"
-        String modules = "biomodal-duet-ultima/1.7.0a1"
+        String modules = "biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"
     }
 
     parameter_meta {
@@ -394,6 +394,19 @@ SHIMEOF
             lane=$(printf 'L%03d' "$((i+1))")
             ln -s "${cram}" "nf-input/${SAMPLE_ID_DASH}_S1_${lane}_R1_001.cram"
             echo "Linked lane ${lane}: $(basename "${cram}")"
+        done
+
+        # ---------------------------------------------------------------------------
+        # 6b. Index each CRAM (.crai). PRELUDE_ULTIMA runs `prelude -r1 <cram> -n N`,
+        #     which reads the CRAM in parallel chunks and needs a CRAM index beside
+        #     the file to seek to chunk boundaries; a large CRAM without one dies with
+        #     "cram_index_load: Could not retrieve index file". 
+        # ---------------------------------------------------------------------------
+        for cram in nf-input/*.cram; do
+            if [ ! -f "${cram}.crai" ]; then
+                echo "Indexing ${cram} ..."
+                samtools index -@ 4 "${cram}" "${cram}.crai"
+            fi
         done
 
         # ---------------------------------------------------------------------------
