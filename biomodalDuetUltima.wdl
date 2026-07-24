@@ -143,8 +143,9 @@ task runDuet {
         Int maskEndCs  = 5
         Boolean callGermlineVariants = true
         String variantCaller = "deepvariant"
-        Int maxCpus = 30
+        Int maxCpus = 16
         Int maxMemory = 64
+        Int maxTime = 48
         Int jobMemory = 16
         Int timeout = 96
     }
@@ -168,7 +169,7 @@ task runDuet {
         maxCpus: "Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes."
         maxMemory: "Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes."
         jobMemory: "Memory in GB for the head (Nextflow driver) task"
-        timeout: "Timeout in hours"
+        maxTime: "Per-process wall-time limit in hours "
     }
 
     command <<<
@@ -277,7 +278,8 @@ process {
 
 process {
     penv           = 'smp'
-    clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toGiga()}g" }
+    time           = '~{maxTime}h'
+    clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toMega().intdiv(task.cpus)}M" }
 }
 NFEOF
 
