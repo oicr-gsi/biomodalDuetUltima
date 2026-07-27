@@ -146,6 +146,8 @@ task runDuet {
         Int maxCpus = 16
         Int maxMemory = 64
         Int maxTime = 48
+        Int splitReadsPreResolution = -1
+        Int gvcfScatterCount = 20
         Int jobMemory = 16
         Int timeout = 96
     }
@@ -168,6 +170,8 @@ task runDuet {
         variantCaller: "Germline variant caller: deepvariant (Ultima-trained model), gatk, or both"
         maxCpus: "Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes."
         maxMemory: "Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes."
+        splitReadsPreResolution: "If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off)."
+        gvcfScatterCount: "Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default)."
         jobMemory: "Memory in GB for the head (Nextflow driver) task"
         maxTime: "Per-process wall-time limit in hours "
     }
@@ -188,6 +192,7 @@ task runDuet {
         chmod 770 ./biomodal_instance/cli_config.yaml ./biomodal_instance/nextflow_override.config
 
         cp -rL "$BIOMODAL_INSTANCE_DIR/pipelines" ./biomodal_instance/pipelines
+        chmod -R u+w ./biomodal_instance/pipelines
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
 
@@ -221,6 +226,19 @@ else:
     sys.stderr.write("       biomodal may have restructured the module -- re-verify the fix.\n")
     sys.exit(1)
 PYEOF
+
+        # ---------------------------------------------------------------------------
+        # 1c. Fix a biomodal typo in samtools_cram_to_fastq.nf: SAMTOOLS_CRAM_TO_FASTQ_SINGLE
+        #     runs `samtools fastq -@ {task.cpus} ...` -- missing the '$', so Nextflow
+        #     passes the literal string {task.cpus}, samtools parses it as 0 threads, and
+        #     the CRAM->FASTQ conversion (used in split mode) runs SINGLE-THREADED. Restore ${task.cpus}.
+        #     Idempotent (only edits if the buggy pattern is present).
+        # ---------------------------------------------------------------------------
+        CRAM2FQ_NF="${INSTANCE_DIR}/pipelines/duet/1.7.0a1/modules/samtools_cram_to_fastq.nf"
+        if grep -q -- '-@ {task.cpus}' "${CRAM2FQ_NF}"; then
+            sed -i 's/-@ {task.cpus}/-@ ${task.cpus}/g' "${CRAM2FQ_NF}"
+            echo "Patched samtools_cram_to_fastq.nf: -@ {task.cpus} -> -@ \${task.cpus} (biomodal typo forced single-threaded CRAM->FASTQ)"
+        fi
 
         # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
@@ -402,14 +420,21 @@ SHIMEOF
         # 6b. Index each CRAM (.crai). PRELUDE_ULTIMA runs `prelude -r1 <cram> -n N`,
         #     which reads the CRAM in parallel chunks and needs a CRAM index beside
         #     the file to seek to chunk boundaries; a large CRAM without one dies with
-        #     "cram_index_load: Could not retrieve index file". 
+        #     "cram_index_load: Could not retrieve index file". SKIPPED ENTIRELY in 
+        #     split mode (splitReadsPreResolution > 0): there the
+        #     pipeline converts CRAM->FASTQ (sequential, no index) and PRELUDE reads
+        #     FASTQ chunks, so the index is never used.
         # ---------------------------------------------------------------------------
-        for cram in nf-input/*.cram; do
-            if [ ! -f "${cram}.crai" ]; then
-                echo "Indexing ${cram} ..."
-                samtools index -@ 4 "${cram}" "${cram}.crai"
-            fi
-        done
+        if [ "~{splitReadsPreResolution}" -le 0 ]; then
+            for cram in nf-input/*.cram; do
+                if [ ! -f "${cram}.crai" ]; then
+                    echo "Indexing ${cram} ..."
+                    samtools index -@ 4 "${cram}" "${cram}.crai"
+                fi
+            done
+        else
+            echo "Split mode (split_reads_pre_resolution=~{splitReadsPreResolution}): PRELUDE reads FASTQ chunks; skipping CRAM index."
+        fi
 
         # ---------------------------------------------------------------------------
         # 7. Run biomodal DUET in Ultima mode.
@@ -467,6 +492,8 @@ SHIMEOF
             --additional-params ultima_single_end_input=true \
             --additional-params override_sequencer="ultima" \
             --additional-params input_file_pattern="*.cram" \
+            --additional-params split_reads_pre_resolution=~{splitReadsPreResolution} \
+            --additional-params gvcf_scatter_count=~{gvcfScatterCount} \
             --additional-params prelude.hp_min_overlap=~{hpMinOverlap} \
             --additional-params prelude.hp_max_error_rate=~{hpMaxErrorRate} \
             --additional-params prelude.front_quality_trim=~{frontQualityTrim} \
