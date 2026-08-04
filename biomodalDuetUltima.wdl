@@ -9,6 +9,7 @@ workflow biomodalDuetUltima {
         String mode = "6bp"
         String additionalProfile = "deep_seq"
         String modules = "biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"
+        Int splitCramReads = -1
     }
 
     parameter_meta {
@@ -19,11 +20,27 @@ workflow biomodalDuetUltima {
         mode: "Biomodal DUET mode: 6bp (duet evoC) or 5bp (duet +modC). Default: 6bp"
         additionalProfile: "Nextflow resource profile: deep_seq (<=500M reads), super_seq (>500M reads), or empty (<=50M reads). Default: deep_seq"
         modules: "Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)"
+        splitCramReads: "If >0, split the single input CRAM into parts of this many reads and present them to the pipeline as separate lanes, so PRELUDE runs per part in parallel. This is the fast alternative to the pipeline's own split_reads_pre_resolution, which first converts CRAM->FASTQ and then splits with seqkit -- measured at 10.4 MB/s against samtools' 77.3 MB/s on the same data. Requires exactly one input CRAM. Default -1 (off)."
+    }
+
+    # Split mode: partition the one input CRAM into pseudo-lanes up front. The
+    # pipeline parallelises PRELUDE and BWA_MEM2 per lane and merges before dedup
+    # (resolve_align.nf), so this is the same parallelism its own splitter provides
+    # without the CRAM->FASTQ round trip.
+    if (splitCramReads > 0 && length(crams) == 1) {
+        call splitCram {
+            input:
+                cram = crams[0],
+                outputFileNamePrefix = outputFileNamePrefix,
+                readsPerPart = splitCramReads,
+                modules = modules
+        }
     }
 
     call runDuet {
         input:
-            crams = crams,
+            crams = select_first([splitCram.parts, crams]),
+            craiIndexes = splitCram.indexes,
             sampleId = sampleId,
             runName  = runName,
             outputFileNamePrefix = outputFileNamePrefix,
@@ -125,9 +142,91 @@ workflow biomodalDuetUltima {
     }
 }
 
+task splitCram {
+    input {
+        File cram
+        String outputFileNamePrefix
+        Int readsPerPart
+        String modules
+        Int cores = 8
+        Int jobMemory = 16
+        Int timeout = 24
+    }
+    parameter_meta {
+        cram: "The single unaligned Ultima CRAM to partition"
+        outputFileNamePrefix: "Prefix for the part file names"
+        readsPerPart: "Reads per part. 2.27B reads / 150000000 gives 16 parts."
+        modules: "Environment modules; only samtools is used here"
+        cores: "Slots for the task. One decoder thread pool plus a writer, so 8 is ample; samtools measured 3.6 effective cores on the equivalent CRAM->FASTQ pass."
+        jobMemory: "Memory in GB. The pass is streaming, so this is generous."
+        timeout: "Wall-time limit in hours"
+    }
+
+    command <<<
+        set -euo pipefail
+
+        mkdir -p parts
+
+        # Every part needs the input's header. --no-PG keeps samtools from
+        # appending a @PG line per part, which would make the parts differ
+        # from each other for no reason.
+        samtools view -H --no-PG "~{cram}" > header.sam
+
+        # One streaming pass:
+        #   samtools view   decodes CRAM -> SAM on stdout
+        #   split -l        counts records and hands each block to its own filter
+        #   the filter      prepends the header, re-encodes to CRAM, and indexes
+        #
+        # Only pipes sit between the three stages, so the disk cost is one read
+        # of the input plus one write of the output -- no intermediate FASTQ.
+        # Indexing happens inside the filter, while the part it just wrote is
+        # still in page cache, which is far cheaper than a second pass over
+        # every part afterwards.
+        #
+        # split runs one filter at a time, so the writer only ever needs a
+        # couple of threads; the rest go to the decoder.
+        samtools view -@ ~{cores - 2} --no-PG "~{cram}" \
+            | split -l ~{readsPerPart} -d -a 4 --numeric-suffixes=1 \
+                    --filter='{ cat header.sam; cat; } \
+                              | samtools view -@ 2 --no-PG -C -o "${FILE}.cram" - \
+                              && samtools index -@ 2 "${FILE}.cram" "${FILE}.cram.crai"' \
+                    - "parts/~{outputFileNamePrefix}_part_"
+
+        # Fail loudly rather than silently handing the pipeline one lane.
+        n=$(find parts -maxdepth 1 -name '*.cram' | wc -l)
+        if [ "${n}" -lt 2 ]; then
+            echo "ERROR: split produced ${n} part(s). Expected at least 2." >&2
+            echo "       Check that readsPerPart (~{readsPerPart}) is smaller than the read count." >&2
+            exit 1
+        fi
+        echo "Split into ${n} parts of ~{readsPerPart} reads:"
+        ls -l parts/
+    >>>
+
+    output {
+        Array[File] parts   = glob("parts/*.cram")
+        Array[File] indexes = glob("parts/*.cram.crai")
+    }
+
+    runtime {
+        cpu:     "~{cores}"
+        memory:  "~{jobMemory} GB"
+        timeout: "~{timeout}"
+        modules: "~{modules}"
+    }
+
+    meta {
+        output_meta: {
+            parts: "CRAM parts, each presented to the pipeline as one lane",
+            indexes: "CRAM index (.crai) for each part, required by PRELUDE_ULTIMA"
+        }
+    }
+}
+
 task runDuet {
     input {
         Array[File] crams
+        Array[File]? craiIndexes
         String sampleId
         String runName
         String outputFileNamePrefix
@@ -151,8 +250,12 @@ task runDuet {
         Int jobMemory = 16
         Int timeout = 96
     }
+
+    Array[File] craiList = select_first([craiIndexes, []])
+
     parameter_meta {
         crams: "Array of unaligned Ultima single-read CRAM files (one per lane) for a single sample"
+        craiIndexes: "Optional pre-built .crai for each entry of crams. Supplied by splitCram, which indexes each part while it is still in page cache. When absent, step 6b builds them here instead."
         sampleId: "Sample identifier (used for naming input CRAMs and output files)"
         runName: "Sequencing run name / identifier (used in report file names)"
         outputFileNamePrefix: "Prefix for all output file names"
@@ -240,6 +343,13 @@ PYEOF
             echo "Patched samtools_cram_to_fastq.nf: -@ {task.cpus} -> -@ \${task.cpus} (biomodal typo forced single-threaded CRAM->FASTQ)"
         fi
 
+        # NOTE: do not bother patching seqkit flags in split_fastqs.nf. Benchmarked
+        # against the module's own seqkit and the pipeline container (v2.9.0) on real
+        # chunk data: with GZIPPED input -- which is what SPLIT_FASTQS always gets --
+        # -j 8 gives 1.05x and --compress-level 1 gives nothing while writing 10-15%
+        # more bytes. (-j 8 does give 2.34x on uncompressed input, which is why it
+        # looks promising on paper.) See ref/devlog.txt for the measurements.
+
         # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
         #    container_engine is apptainer for this release; work dir is task-local.
@@ -267,16 +377,23 @@ CLIEOF
         # 3. Append OICR runtime patches to nextflow_override.config.
         # ---------------------------------------------------------------------------
 
-        # 3a. Point the apptainer image cache at the shared module images dir so
-        #     containers are pulled once and reused. runOptions replaces the
-        #     biomodal-shipped one: keep the $TMPDIR->/tmp bind, and additionally
-        #     force TMPDIR=/tmp INSIDE the container. 
+        # 3a. Apptainer image lookup, so containers are reused rather than re-pulled:
+        #       libraryDir -> the module's image set, read-only
+        #       cacheDir   -> GSI staging dir; writable, and holds images not yet built
+        #                     into the module (currently seqkit, needed by split mode)
+        #     Nextflow resolves libraryDir first and only falls back to cacheDir, so
+        #     module images always win and the staging dir just fills the gaps. Point
+        #     cacheDir back at ${BIOMODAL_IMAGES_DIR} once the module ships every image.
+        #     runOptions replaces the biomodal-shipped one: keep the $TMPDIR->/tmp
+        #     bind, and additionally force TMPDIR=/tmp INSIDE the container.
+        IMAGES_STAGING_DIR="/.mounts/labs/gsi/src/biomodal/duet_ultima/images"
+
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 // ---- OICR WDL runtime patches (env-var expanded) ----
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
-    cacheDir   = "${BIOMODAL_IMAGES_DIR}"
+    cacheDir   = "${IMAGES_STAGING_DIR}"
     runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp'
 }
 NFEOF
@@ -408,11 +525,22 @@ SHIMEOF
         mkdir -p nf-input
 
         sorted_crams=($(for f in ~{sep=' ' crams}; do echo "$f"; done | sort))
+        crais=(~{sep=' ' craiList})
 
         for i in "${!sorted_crams[@]}"; do
             cram="${sorted_crams[$i]}"
             lane=$(printf 'L%03d' "$((i+1))")
-            ln -s "${cram}" "nf-input/${SAMPLE_ID_DASH}_S1_${lane}_R1_001.cram"
+            target="nf-input/${SAMPLE_ID_DASH}_S1_${lane}_R1_001.cram"
+            ln -s "${cram}" "${target}"
+            # Cromwell may localize a pre-built index into a different directory
+            # than its CRAM, so match on basename rather than assuming adjacency.
+            for crai in ${crais[@]+"${crais[@]}"}; do
+                if [ "$(basename "${crai}")" = "$(basename "${cram}").crai" ]; then
+                    ln -s "${crai}" "${target}.crai"
+                    echo "Linked prebuilt index for lane ${lane}"
+                    break
+                fi
+            done
             echo "Linked lane ${lane}: $(basename "${cram}")"
         done
 
