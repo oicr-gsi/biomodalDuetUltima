@@ -149,6 +149,7 @@ task splitCram {
         Int readsPerPart
         String modules
         Int cores = 8
+        Int ioSlots = 2
         Int jobMemory = 16
         Int timeout = 24
     }
@@ -157,7 +158,8 @@ task splitCram {
         outputFileNamePrefix: "Prefix for the part file names"
         readsPerPart: "Reads per part. 2.27B reads / 150000000 gives 16 parts."
         modules: "Environment modules; only samtools is used here"
-        cores: "Slots for the task. One decoder thread pool plus a writer, so 8 is ample; samtools measured 3.6 effective cores on the equivalent CRAM->FASTQ pass."
+        cores: "samtools thread count, NOT an SGE slot request: cores-2 threads decode and 2 encode. The UGE backend declares a cpu runtime attribute but never references it in its submit command, so no -pe smp is emitted and the task always gets one slot. Measured 4.7 effective cores at cores=8."
+        ioSlots: "gsi_io_slots to request; the one resource lever this backend actually wires through. all.q carries 10 per queue instance (per host) and an ordinary task takes 1, so 2 declares this pass as roughly twice the I/O load of a normal task without crowding a node. Raising it reduces how many other io-slot-consuming jobs share the host, but it cannot help with contention from jobs on other hosts hitting the same filesystem."
         jobMemory: "Memory in GB. The pass is streaming, so this is generous."
         timeout: "Wall-time limit in hours"
     }
@@ -185,12 +187,34 @@ task splitCram {
         #
         # split runs one filter at a time, so the writer only ever needs a
         # couple of threads; the rest go to the decoder.
-        samtools view -@ ~{cores - 2} --no-PG "~{cram}" \
+        #
+        # -e drops reads lacking the Ultima flow tags. prelude cannot resolve those
+        # reads and skips them, but its skip path also truncates a NEIGHBOURING
+        # record in the resolved FASTQ, which then fails BWA_MEM2 with
+        # "SEQ and QUAL are of different length" hours later. Removing them here
+        # avoids the trigger entirely. Rejected reads are kept and counted rather
+        # than silently discarded. See ref/biomodal_prelude_skip_bug.md; remove this
+        # filter once biomodal fixes the skip path.
+        #
+        # The test is on t0 only. prelude reports the pair together ("missing tag(s)
+        # tp t0") and the two are absent together in this data, but tp cannot be
+        # tested here regardless: it is a B (array) tag and samtools filter
+        # expressions reject those with "Aux type 'B' not yet supported by filters".
+        # The assumption is self-checking -- if a later run still logs prelude skips
+        # after this filter has run, then reads exist that carry t0 but not tp, and
+        # this needs a `grep -F 'tp:B:c'` stage on the SAM stream as well.
+        samtools view -@ ~{cores - 2} --no-PG \
+                      -e 'exists([t0])' \
+                      -U dropped_no_flow_tags.sam \
+                      "~{cram}" \
             | split -l ~{readsPerPart} -d -a 4 --numeric-suffixes=1 \
                     --filter='{ cat header.sam; cat; } \
                               | samtools view -@ 2 --no-PG -C -o "${FILE}.cram" - \
                               && samtools index -@ 2 "${FILE}.cram" "${FILE}.cram.crai"' \
                     - "parts/~{outputFileNamePrefix}_part_"
+
+        n_dropped=$(wc -l < dropped_no_flow_tags.sam)
+        echo "splitCram: dropped ${n_dropped} read(s) lacking tp/t0; IDs in dropped_no_flow_tags.sam"
 
         # Fail loudly rather than silently handing the pipeline one lane.
         n=$(find parts -maxdepth 1 -name '*.cram' | wc -l)
@@ -209,10 +233,16 @@ task splitCram {
     }
 
     runtime {
-        cpu:     "~{cores}"
-        memory:  "~{jobMemory} GB"
-        timeout: "~{timeout}"
-        modules: "~{modules}"
+        # cpu is declared by the UGE backend's runtime-attributes but never used in
+        # its submit command, so it emits no -pe smp and this task gets one slot
+        # whatever it asks for. Kept so the request is correct if the backend is
+        # fixed; until then `cores` only sets samtools -@ threading. io_slots IS
+        # wired through (-l gsi_io_slots) and is the one resource lever available.
+        cpu:      "~{cores}"
+        io_slots: ioSlots
+        memory:   "~{jobMemory} GB"
+        timeout:  "~{timeout}"
+        modules:  "~{modules}"
     }
 
     meta {
@@ -276,7 +306,8 @@ task runDuet {
         splitReadsPreResolution: "If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off)."
         gvcfScatterCount: "Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default)."
         jobMemory: "Memory in GB for the head (Nextflow driver) task"
-        maxTime: "Per-process wall-time limit in hours "
+        maxTime: "Per-process wall-time limit in hours, applied to every Nextflow process as `time`. Distinct from timeout, which bounds the head task."
+        timeout: "Wall-time limit in hours for the head (Nextflow driver) task. Must exceed the total runtime of the whole pipeline, not just any one process -- the driver stays alive until the last Nextflow task finishes."
     }
 
     command <<<

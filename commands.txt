@@ -6,6 +6,68 @@ This section lists command(s) run by biomodalDuetUltima workflow
 ```
         set -euo pipefail
 
+        mkdir -p parts
+
+        # Every part needs the input's header. --no-PG keeps samtools from
+        # appending a @PG line per part, which would make the parts differ
+        # from each other for no reason.
+        samtools view -H --no-PG "~{cram}" > header.sam
+
+        # One streaming pass:
+        #   samtools view   decodes CRAM -> SAM on stdout
+        #   split -l        counts records and hands each block to its own filter
+        #   the filter      prepends the header, re-encodes to CRAM, and indexes
+        #
+        # Only pipes sit between the three stages, so the disk cost is one read
+        # of the input plus one write of the output -- no intermediate FASTQ.
+        # Indexing happens inside the filter, while the part it just wrote is
+        # still in page cache, which is far cheaper than a second pass over
+        # every part afterwards.
+        #
+        # split runs one filter at a time, so the writer only ever needs a
+        # couple of threads; the rest go to the decoder.
+        #
+        # -e drops reads lacking the Ultima flow tags. prelude cannot resolve those
+        # reads and skips them, but its skip path also truncates a NEIGHBOURING
+        # record in the resolved FASTQ, which then fails BWA_MEM2 with
+        # "SEQ and QUAL are of different length" hours later. Removing them here
+        # avoids the trigger entirely. Rejected reads are kept and counted rather
+        # than silently discarded. See ref/biomodal_prelude_skip_bug.md; remove this
+        # filter once biomodal fixes the skip path.
+        #
+        # The test is on t0 only. prelude reports the pair together ("missing tag(s)
+        # tp t0") and the two are absent together in this data, but tp cannot be
+        # tested here regardless: it is a B (array) tag and samtools filter
+        # expressions reject those with "Aux type 'B' not yet supported by filters".
+        # The assumption is self-checking -- if a later run still logs prelude skips
+        # after this filter has run, then reads exist that carry t0 but not tp, and
+        # this needs a `grep -F 'tp:B:c'` stage on the SAM stream as well.
+        samtools view -@ ~{cores - 2} --no-PG \
+                      -e 'exists([t0])' \
+                      -U dropped_no_flow_tags.sam \
+                      "~{cram}" \
+            | split -l ~{readsPerPart} -d -a 4 --numeric-suffixes=1 \
+                    --filter='{ cat header.sam; cat; } \
+                              | samtools view -@ 2 --no-PG -C -o "${FILE}.cram" - \
+                              && samtools index -@ 2 "${FILE}.cram" "${FILE}.cram.crai"' \
+                    - "parts/~{outputFileNamePrefix}_part_"
+
+        n_dropped=$(wc -l < dropped_no_flow_tags.sam)
+        echo "splitCram: dropped ${n_dropped} read(s) lacking tp/t0; IDs in dropped_no_flow_tags.sam"
+
+        # Fail loudly rather than silently handing the pipeline one lane.
+        n=$(find parts -maxdepth 1 -name '*.cram' | wc -l)
+        if [ "${n}" -lt 2 ]; then
+            echo "ERROR: split produced ${n} part(s). Expected at least 2." >&2
+            echo "       Check that readsPerPart (~{readsPerPart}) is smaller than the read count." >&2
+            exit 1
+        fi
+        echo "Split into ${n} parts of ~{readsPerPart} reads:"
+        ls -l parts/
+```
+```
+        set -euo pipefail
+
         # ---------------------------------------------------------------------------
         # 1. Build a writable instance directory. The biomodal CLI needs writable
         #    copies of the two config files it rewrites, plus a real (symlink-free)
@@ -19,6 +81,7 @@ This section lists command(s) run by biomodalDuetUltima workflow
         chmod 770 ./biomodal_instance/cli_config.yaml ./biomodal_instance/nextflow_override.config
 
         cp -rL "$BIOMODAL_INSTANCE_DIR/pipelines" ./biomodal_instance/pipelines
+        chmod -R u+w ./biomodal_instance/pipelines
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
 
@@ -54,6 +117,26 @@ else:
 PYEOF
 
         # ---------------------------------------------------------------------------
+        # 1c. Fix a biomodal typo in samtools_cram_to_fastq.nf: SAMTOOLS_CRAM_TO_FASTQ_SINGLE
+        #     runs `samtools fastq -@ {task.cpus} ...` -- missing the '$', so Nextflow
+        #     passes the literal string {task.cpus}, samtools parses it as 0 threads, and
+        #     the CRAM->FASTQ conversion (used in split mode) runs SINGLE-THREADED. Restore ${task.cpus}.
+        #     Idempotent (only edits if the buggy pattern is present).
+        # ---------------------------------------------------------------------------
+        CRAM2FQ_NF="${INSTANCE_DIR}/pipelines/duet/1.7.0a1/modules/samtools_cram_to_fastq.nf"
+        if grep -q -- '-@ {task.cpus}' "${CRAM2FQ_NF}"; then
+            sed -i 's/-@ {task.cpus}/-@ ${task.cpus}/g' "${CRAM2FQ_NF}"
+            echo "Patched samtools_cram_to_fastq.nf: -@ {task.cpus} -> -@ \${task.cpus} (biomodal typo forced single-threaded CRAM->FASTQ)"
+        fi
+
+        # NOTE: do not bother patching seqkit flags in split_fastqs.nf. Benchmarked
+        # against the module's own seqkit and the pipeline container (v2.9.0) on real
+        # chunk data: with GZIPPED input -- which is what SPLIT_FASTQS always gets --
+        # -j 8 gives 1.05x and --compress-level 1 gives nothing while writing 10-15%
+        # more bytes. (-j 8 does give 2.34x on uncompressed input, which is why it
+        # looks promising on paper.) See ref/devlog.txt for the measurements.
+
+        # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
         #    container_engine is apptainer for this release; work dir is task-local.
         # ---------------------------------------------------------------------------
@@ -80,16 +163,23 @@ CLIEOF
         # 3. Append OICR runtime patches to nextflow_override.config.
         # ---------------------------------------------------------------------------
 
-        # 3a. Point the apptainer image cache at the shared module images dir so
-        #     containers are pulled once and reused. runOptions replaces the
-        #     biomodal-shipped one: keep the $TMPDIR->/tmp bind, and additionally
-        #     force TMPDIR=/tmp INSIDE the container. 
+        # 3a. Apptainer image lookup, so containers are reused rather than re-pulled:
+        #       libraryDir -> the module's image set, read-only
+        #       cacheDir   -> GSI staging dir; writable, and holds images not yet built
+        #                     into the module (currently seqkit, needed by split mode)
+        #     Nextflow resolves libraryDir first and only falls back to cacheDir, so
+        #     module images always win and the staging dir just fills the gaps. Point
+        #     cacheDir back at ${BIOMODAL_IMAGES_DIR} once the module ships every image.
+        #     runOptions replaces the biomodal-shipped one: keep the $TMPDIR->/tmp
+        #     bind, and additionally force TMPDIR=/tmp INSIDE the container.
+        IMAGES_STAGING_DIR="/.mounts/labs/gsi/src/biomodal/duet_ultima/images"
+
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 // ---- OICR WDL runtime patches (env-var expanded) ----
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
-    cacheDir   = "${BIOMODAL_IMAGES_DIR}"
+    cacheDir   = "${IMAGES_STAGING_DIR}"
     runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp'
 }
 NFEOF
@@ -109,7 +199,8 @@ process {
 
 process {
     penv           = 'smp'
-    clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toGiga()}g" }
+    time           = '~{maxTime}h'
+    clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toMega().intdiv(task.cpus)}M" }
 }
 NFEOF
 
@@ -220,13 +311,44 @@ SHIMEOF
         mkdir -p nf-input
 
         sorted_crams=($(for f in ~{sep=' ' crams}; do echo "$f"; done | sort))
+        crais=(~{sep=' ' craiList})
 
         for i in "${!sorted_crams[@]}"; do
             cram="${sorted_crams[$i]}"
             lane=$(printf 'L%03d' "$((i+1))")
-            ln -s "${cram}" "nf-input/${SAMPLE_ID_DASH}_S1_${lane}_R1_001.cram"
+            target="nf-input/${SAMPLE_ID_DASH}_S1_${lane}_R1_001.cram"
+            ln -s "${cram}" "${target}"
+            # Cromwell may localize a pre-built index into a different directory
+            # than its CRAM, so match on basename rather than assuming adjacency.
+            for crai in ${crais[@]+"${crais[@]}"}; do
+                if [ "$(basename "${crai}")" = "$(basename "${cram}").crai" ]; then
+                    ln -s "${crai}" "${target}.crai"
+                    echo "Linked prebuilt index for lane ${lane}"
+                    break
+                fi
+            done
             echo "Linked lane ${lane}: $(basename "${cram}")"
         done
+
+        # ---------------------------------------------------------------------------
+        # 6b. Index each CRAM (.crai). PRELUDE_ULTIMA runs `prelude -r1 <cram> -n N`,
+        #     which reads the CRAM in parallel chunks and needs a CRAM index beside
+        #     the file to seek to chunk boundaries; a large CRAM without one dies with
+        #     "cram_index_load: Could not retrieve index file". SKIPPED ENTIRELY in 
+        #     split mode (splitReadsPreResolution > 0): there the
+        #     pipeline converts CRAM->FASTQ (sequential, no index) and PRELUDE reads
+        #     FASTQ chunks, so the index is never used.
+        # ---------------------------------------------------------------------------
+        if [ "~{splitReadsPreResolution}" -le 0 ]; then
+            for cram in nf-input/*.cram; do
+                if [ ! -f "${cram}.crai" ]; then
+                    echo "Indexing ${cram} ..."
+                    samtools index -@ 4 "${cram}" "${cram}.crai"
+                fi
+            done
+        else
+            echo "Split mode (split_reads_pre_resolution=~{splitReadsPreResolution}): PRELUDE reads FASTQ chunks; skipping CRAM index."
+        fi
 
         # ---------------------------------------------------------------------------
         # 7. Run biomodal DUET in Ultima mode.
@@ -284,6 +406,8 @@ SHIMEOF
             --additional-params ultima_single_end_input=true \
             --additional-params override_sequencer="ultima" \
             --additional-params input_file_pattern="*.cram" \
+            --additional-params split_reads_pre_resolution=~{splitReadsPreResolution} \
+            --additional-params gvcf_scatter_count=~{gvcfScatterCount} \
             --additional-params prelude.hp_min_overlap=~{hpMinOverlap} \
             --additional-params prelude.hp_max_error_rate=~{hpMaxErrorRate} \
             --additional-params prelude.front_quality_trim=~{frontQualityTrim} \
