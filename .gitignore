@@ -15,3 +15,7 @@ test_inputs*.json
 .idea/
 *.swp
 .DS_Store
+
+# Rendered diagram: the SVG in docs/ IS committed; the PNG is rendered on demand
+# for wiki attachments (bash docs/render.sh --png) and never committed.
+*.png

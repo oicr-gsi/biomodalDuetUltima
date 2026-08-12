@@ -4,6 +4,8 @@
 
 WDL wrapper for the Biomodal DUET evoC methylation-sequencing pipeline v1.7.0a1, running the Ultima single-read CRAM-input early-access mode on OICR's UGE/SGE cluster via Apptainer.
 
+![biomodalDuetUltima](docs/biomodalDuetUltima.svg)
+
 ## Dependencies
 
 * [biomodal-duet-ultima 1.7.0a1](https://biomodal.com)

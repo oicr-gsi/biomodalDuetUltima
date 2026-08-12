@@ -54,7 +54,7 @@ workflow biomodalDuetUltima {
     meta {
         author: "Gavin Peng"
         email: "gpeng@oicr.on.ca"
-        description: "WDL wrapper for the Biomodal DUET evoC methylation-sequencing pipeline v1.7.0a1, running the Ultima single-read CRAM-input early-access mode on OICR's UGE/SGE cluster via Apptainer."
+        description: "WDL wrapper for the Biomodal DUET evoC methylation-sequencing pipeline v1.7.0a1, running the Ultima single-read CRAM-input early-access mode on OICR's UGE/SGE cluster via Apptainer.\n\n![biomodalDuetUltima](docs/biomodalDuetUltima.svg)"
         dependencies: [
             {
                 name: "biomodal-duet-ultima/1.7.0a1",
