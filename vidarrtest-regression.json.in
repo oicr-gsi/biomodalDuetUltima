@@ -6,7 +6,7 @@
             "biomodalDuetUltima.crams": [
                 {
                     "contents": {
-                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample_S1_L001_R1_001.cram",
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
                         "externalIds": [
                             {
                                 "id": "TEST",
@@ -189,7 +189,7 @@
             "biomodalDuetUltima.crams": [
                 {
                     "contents": {
-                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample_S1_L001_R1_001.cram",
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
                         "externalIds": [
                             {
                                 "id": "TEST",
