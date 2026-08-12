@@ -27,7 +27,14 @@ for report in *cxreport.txt.gz; do
     echo "-- $report"
     # Field count of the first record. The per-position calls underneath are expected to
     # drift; the column count is the schema and should not change silently.
-    zcat "$report" | head -1 | awk -F'\t' '{print "fields: " NF}'
+    #
+    # Read through a process substitution, NOT `zcat | head -1`. Under `set -o pipefail`
+    # that pipeline reports zcat's SIGPIPE death (exit 141) as the pipeline's status the
+    # moment head closes the pipe, and `set -e` then aborts the whole script -- leaving a
+    # metrics file truncated at this point. A redirect from a process substitution is not
+    # a pipeline, so zcat's status is never examined.
+    IFS= read -r first_record < <(zcat "$report")
+    awk -F'\t' '{print "fields: " NF}' <<< "$first_record"
 done
 
 echo "### summary metrics present"
