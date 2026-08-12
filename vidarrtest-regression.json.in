@@ -6,7 +6,7 @@
             "biomodalDuetUltima.crams": [
                 {
                     "contents": {
-                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample_S1_L001_R1_001.cram",
                         "externalIds": [
                             {
                                 "id": "TEST",
@@ -22,7 +22,7 @@
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_01",
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
-            "biomodalDuetUltima.runDuet.callGermlineVariants": null,
+            "biomodalDuetUltima.runDuet.callGermlineVariants": false,
             "biomodalDuetUltima.runDuet.frontQualityTrim": null,
             "biomodalDuetUltima.runDuet.gvcfScatterCount": null,
             "biomodalDuetUltima.runDuet.hpMaxErrorRate": null,
@@ -189,7 +189,7 @@
             "biomodalDuetUltima.crams": [
                 {
                     "contents": {
-                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample_S1_L001_R1_001.cram",
                         "externalIds": [
                             {
                                 "id": "TEST",
@@ -205,7 +205,7 @@
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_02",
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
-            "biomodalDuetUltima.runDuet.callGermlineVariants": null,
+            "biomodalDuetUltima.runDuet.callGermlineVariants": false,
             "biomodalDuetUltima.runDuet.frontQualityTrim": null,
             "biomodalDuetUltima.runDuet.gvcfScatterCount": null,
             "biomodalDuetUltima.runDuet.hpMaxErrorRate": null,
