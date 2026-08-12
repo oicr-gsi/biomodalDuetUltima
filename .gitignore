@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.ruff_cache/
+
+# Cromwell / test scratch
+cromwell-executions/
+cromwell-workflow-logs/
+*.log
+inputs.json
+test_inputs*.json
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

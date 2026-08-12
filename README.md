@@ -34,6 +34,7 @@ Parameter|Value|Default|Description
 `additionalProfile`|String|"deep_seq"|Nextflow resource profile: deep_seq (<=500M reads), super_seq (>500M reads), or empty (<=50M reads). Default: deep_seq
 `modules`|String|"biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"|Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)
 `splitCramReads`|Int|-1|If >0, split the single input CRAM into parts of this many reads and present them to the pipeline as separate lanes, so PRELUDE runs per part in parallel. This is the fast alternative to the pipeline's own split_reads_pre_resolution, which first converts CRAM->FASTQ and then splits with seqkit -- measured at 10.4 MB/s against samtools' 77.3 MB/s on the same data. Requires exactly one input CRAM. Default -1 (off).
+`craiIndexes`|Array[File]?|None|Optional pre-built .crai, one per entry of crams, matched by basename. Only used when splitCram does not run -- when it does, its own indexes take precedence. Supply this when re-running against parts a previous splitCram already produced, otherwise step 6b re-indexes every part from scratch.
 
 
 #### Optional task parameters:
@@ -53,7 +54,8 @@ Parameter|Value|Default|Description
 `runDuet.callGermlineVariants`|Boolean|true|Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)
 `runDuet.variantCaller`|String|"deepvariant"|Germline variant caller: deepvariant (Ultima-trained model), gatk, or both
 `runDuet.maxCpus`|Int|16|Cap on per-process cpus/slots for heavy steps (PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE, DEEPVARIANT_CALLER always; BWA_MEM2, MUTECT2 when a profile is set). OICR all.q offers at most 39 slots/node (31 on default nodes) but these steps hardcode/request 32-96, so they must be capped to schedule. Lower it (e.g. 8-16) for small test runs or to fit smaller/busier nodes; default 30 fits the 31-slot default nodes.
-`runDuet.maxMemory`|Int|64|Cap (GB) on per-process memory for heavy steps (BWA_MEM2, MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 16) for small test runs to fit the plentiful ~62GB nodes.
+`runDuet.maxMemory`|Int|64|Cap (GB) on per-process memory for heavy steps (MUTECT2, HAPLOTYPE_CALLER, GENOMICS_DB_IMPORT, DEEPVARIANT_CALLER, PRELUDE, PRELUDE_ULTIMA, BIOMODAL_COLLAPSE). These hardcode 32-64GB, so a 64GB h_vmem request only fits the scarce big all.q nodes and can sit in 'qw'. Only reduces (min with the base value), so default 64 is a no-op that preserves production memory; lower it (e.g. 24) so PRELUDE fits the plentiful ~62GB nodes. Does NOT apply to BWA_MEM2 -- see bwaMem2Memory.
+`runDuet.bwaMem2Memory`|Int|40|Memory in GB for BWA_MEM2, set independently of maxMemory. bwa-mem2 loads its entire index into RAM (~16GB for GRCh38Decoy+controls: .bwt.2bit.64 9.5GB + .0123 5.8GB + .pac 0.7GB) and peaks around 20GB resident, plus page cache from unpacking the index archive in the same cgroup. Sharing PRELUDE's lower cap kills it mid-alignment; biomodal's own 64GB does not fit the common ~62GB nodes. Default 40 clears the measured peak with headroom and still schedules.
 `runDuet.maxTime`|Int|48|Per-process wall-time limit in hours, applied to every Nextflow process as `time`. Distinct from timeout, which bounds the head task.
 `runDuet.splitReadsPreResolution`|Int|-1|If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off).
 `runDuet.gvcfScatterCount`|Int|20|Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default).
@@ -309,11 +311,18 @@ process {
 NFEOF
         fi
 
-        # 3d. Clamp per-process memory to maxMemory. 
+        # 3d. Clamp per-process memory to maxMemory.
+        #     BWA_MEM2 is deliberately NOT in this list -- it gets bwaMem2Memory.
+        #     bwa-mem2 loads its whole index into RAM and needs far more than the
+        #     value that makes PRELUDE schedulable, so one shared cap cannot serve
+        #     both: clamped to the same number as PRELUDE it is killed by the cgroup
+        #     ("failed 52 : cgroups enforced memory limit" in qacct) partway through
+        #     alignment, which surfaces confusingly as "samtools sort: truncated
+        #     file" because bwa dies mid-write and the pipe closes.
         {
             echo ""
             echo "process {"
-            for spec in "BWA_MEM2:64" "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
+            for spec in "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
                         "GENOMICS_DB_IMPORT:64" "DEEPVARIANT_CALLER:64" \
                         "PRELUDE:32" "PRELUDE_ULTIMA:32" "BIOMODAL_COLLAPSE:32"; do
                 pname="${spec%%:*}"; base="${spec##*:}"
@@ -321,8 +330,40 @@ NFEOF
                     echo "    withName: '${pname}' { memory = '~{maxMemory}GB' }"
                 fi
             done
+            echo "    withName: 'BWA_MEM2' { memory = '~{bwaMem2Memory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
+
+        # 3e. Enable execution tracing here rather than on the command line.
+        #     -with-trace / -with-report are Nextflow CLI options (single dash); the
+        #     biomodal CLI forwards --additional-params as pipeline params (double
+        #     dash), so passing them that way silently does nothing -- .command.trace
+        #     stays empty and no aggregate trace is written. Setting them in the
+        #     config works regardless of how the CLI forwards arguments.
+        #     nf_trace.tsv is the per-process record of runtime, cpu and peak memory,
+        #     which is the only way to size maxMemory/bwaMem2Memory from evidence
+        #     instead of guessing.
+        cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+
+trace {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_trace.tsv"
+    fields    = 'task_id,name,status,exit,attempt,realtime,%cpu,peak_rss,peak_vmem,rchar,wchar'
+}
+
+report {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_report.html"
+}
+
+timeline {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_timeline.html"
+}
+NFEOF
 
         # ---------------------------------------------------------------------------
         # 4. qsub shim (cgroup memory-kill fix).
@@ -369,6 +410,12 @@ SHIMEOF
         export NXF_OPTS="-Xms512m -Xmx8g"
         # Fully offline run: no network fetches at runtime.
         export NXF_OFFLINE=true
+        # One line per event instead of an in-place ANSI progress block. The ANSI
+        # renderer truncates process names to fit the terminal, which makes the
+        # captured stdout nearly useless for telling PRELUDE from BWA_MEM2.
+        # -ansi-log is a Nextflow CLI option, not a pipeline param, so it cannot be
+        # passed through the biomodal CLI's --additional-params; the env var can.
+        export NXF_ANSI_LOG=false
         JAR=$(find "${INSTANCE_DIR}/pipelines/duet/1.7.0a1" -name "nextflow-*-one.jar" 2>/dev/null | head -1 || true)
         if [ -n "${JAR}" ]; then
             JAR_VER=$(basename "${JAR}" | sed -E 's/^nextflow-(.*)-one\.jar$/\1/')

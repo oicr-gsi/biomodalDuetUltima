@@ -225,11 +225,18 @@ process {
 NFEOF
         fi
 
-        # 3d. Clamp per-process memory to maxMemory. 
+        # 3d. Clamp per-process memory to maxMemory.
+        #     BWA_MEM2 is deliberately NOT in this list -- it gets bwaMem2Memory.
+        #     bwa-mem2 loads its whole index into RAM and needs far more than the
+        #     value that makes PRELUDE schedulable, so one shared cap cannot serve
+        #     both: clamped to the same number as PRELUDE it is killed by the cgroup
+        #     ("failed 52 : cgroups enforced memory limit" in qacct) partway through
+        #     alignment, which surfaces confusingly as "samtools sort: truncated
+        #     file" because bwa dies mid-write and the pipe closes.
         {
             echo ""
             echo "process {"
-            for spec in "BWA_MEM2:64" "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
+            for spec in "MUTECT2:64" "HAPLOTYPE_CALLER:64" \
                         "GENOMICS_DB_IMPORT:64" "DEEPVARIANT_CALLER:64" \
                         "PRELUDE:32" "PRELUDE_ULTIMA:32" "BIOMODAL_COLLAPSE:32"; do
                 pname="${spec%%:*}"; base="${spec##*:}"
@@ -237,8 +244,40 @@ NFEOF
                     echo "    withName: '${pname}' { memory = '~{maxMemory}GB' }"
                 fi
             done
+            echo "    withName: 'BWA_MEM2' { memory = '~{bwaMem2Memory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
+
+        # 3e. Enable execution tracing here rather than on the command line.
+        #     -with-trace / -with-report are Nextflow CLI options (single dash); the
+        #     biomodal CLI forwards --additional-params as pipeline params (double
+        #     dash), so passing them that way silently does nothing -- .command.trace
+        #     stays empty and no aggregate trace is written. Setting them in the
+        #     config works regardless of how the CLI forwards arguments.
+        #     nf_trace.tsv is the per-process record of runtime, cpu and peak memory,
+        #     which is the only way to size maxMemory/bwaMem2Memory from evidence
+        #     instead of guessing.
+        cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+
+trace {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_trace.tsv"
+    fields    = 'task_id,name,status,exit,attempt,realtime,%cpu,peak_rss,peak_vmem,rchar,wchar'
+}
+
+report {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_report.html"
+}
+
+timeline {
+    enabled   = true
+    overwrite = true
+    file      = "$(pwd)/nf_timeline.html"
+}
+NFEOF
 
         # ---------------------------------------------------------------------------
         # 4. qsub shim (cgroup memory-kill fix).
@@ -285,6 +324,12 @@ SHIMEOF
         export NXF_OPTS="-Xms512m -Xmx8g"
         # Fully offline run: no network fetches at runtime.
         export NXF_OFFLINE=true
+        # One line per event instead of an in-place ANSI progress block. The ANSI
+        # renderer truncates process names to fit the terminal, which makes the
+        # captured stdout nearly useless for telling PRELUDE from BWA_MEM2.
+        # -ansi-log is a Nextflow CLI option, not a pipeline param, so it cannot be
+        # passed through the biomodal CLI's --additional-params; the env var can.
+        export NXF_ANSI_LOG=false
         JAR=$(find "${INSTANCE_DIR}/pipelines/duet/1.7.0a1" -name "nextflow-*-one.jar" 2>/dev/null | head -1 || true)
         if [ -n "${JAR}" ]; then
             JAR_VER=$(basename "${JAR}" | sed -E 's/^nextflow-(.*)-one\.jar$/\1/')
