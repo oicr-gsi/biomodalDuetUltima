@@ -27,21 +27,11 @@ This section lists command(s) run by biomodalDuetUltima workflow
         # split runs one filter at a time, so the writer only ever needs a
         # couple of threads; the rest go to the decoder.
         #
-        # -e drops reads lacking the Ultima flow tags. prelude cannot resolve those
-        # reads and skips them, but its skip path also truncates a NEIGHBOURING
-        # record in the resolved FASTQ, which then fails BWA_MEM2 with
-        # "SEQ and QUAL are of different length" hours later. Removing them here
-        # avoids the trigger entirely. Rejected reads are kept and counted rather
-        # than silently discarded. See ref/biomodal_prelude_skip_bug.md; remove this
-        # filter once biomodal fixes the skip path.
-        #
-        # The test is on t0 only. prelude reports the pair together ("missing tag(s)
-        # tp t0") and the two are absent together in this data, but tp cannot be
-        # tested here regardless: it is a B (array) tag and samtools filter
-        # expressions reject those with "Aux type 'B' not yet supported by filters".
-        # The assumption is self-checking -- if a later run still logs prelude skips
-        # after this filter has run, then reads exist that carry t0 but not tp, and
-        # this needs a `grep -F 'tp:B:c'` stage on the SAM stream as well.
+        # -e drops reads lacking the Ultima flow tags. prelude cannot resolve them
+        # and skips them, but its skip path corrupts a neighbouring record in the
+        # resolved FASTQ, which fails alignment later. Rejected reads are kept and
+        # counted rather than silently discarded. Remove once fixed upstream.
+        # Tests t0 only: tp is a B (array) tag, which samtools filters cannot read.
         samtools view -@ ~{cores - 2} --no-PG \
                       -e 'exists([t0])' \
                       -U dropped_no_flow_tags.sam \
@@ -95,12 +85,12 @@ This section lists command(s) run by biomodalDuetUltima workflow
 import os, sys, pathlib
 p = pathlib.Path(os.environ["BWA_NF"])
 text = p.read_text()
-marker = "OICR hotfix (biomodal @PG bug)"
+marker = "hotfix: bwa-mem2 @PG header"
 anchor = "      samtools index -@"
 if marker in text:
     print("bwa_mem2.nf: @PG hotfix already present, skipping")
 elif anchor in text:
-    insert = r'''      # --- OICR hotfix (biomodal @PG bug): bwa-mem2 writes its tab-delimited
+    insert = r'''      # --- hotfix: bwa-mem2 @PG header. bwa-mem2 writes its tab-delimited
       # -R read group into the @PG CL: field, corrupting the SAM header (duplicate
       # ID tags) and crashing qualimap. Collapse the tabs inside @PG CL: to spaces.
       samtools view -H ${bam_file_tag}.bam | sed '/^@PG/{:a; s/\\(CL:.*\\)\\t/\\1 /; ta}' > fixed_header.sam
@@ -129,12 +119,8 @@ PYEOF
             echo "Patched samtools_cram_to_fastq.nf: -@ {task.cpus} -> -@ \${task.cpus} (biomodal typo forced single-threaded CRAM->FASTQ)"
         fi
 
-        # NOTE: do not bother patching seqkit flags in split_fastqs.nf. Benchmarked
-        # against the module's own seqkit and the pipeline container (v2.9.0) on real
-        # chunk data: with GZIPPED input -- which is what SPLIT_FASTQS always gets --
-        # -j 8 gives 1.05x and --compress-level 1 gives nothing while writing 10-15%
-        # more bytes. (-j 8 does give 2.34x on uncompressed input, which is why it
-        # looks promising on paper.) See ref/devlog.txt for the measurements.
+        # NOTE: seqkit flag tuning in split_fastqs.nf was benchmarked and does not
+        # help on gzipped input, which is what that step gets. See devlog.
 
         # ---------------------------------------------------------------------------
         # 2. Rewrite cli_config.yaml with runtime paths from the module env vars.
@@ -160,12 +146,12 @@ PYEOF
 CLIEOF
 
         # ---------------------------------------------------------------------------
-        # 3. Append OICR runtime patches to nextflow_override.config.
+        # 3. Append cluster runtime overrides to nextflow_override.config.
         # ---------------------------------------------------------------------------
 
         # 3a. Apptainer image lookup, so containers are reused rather than re-pulled:
         #       libraryDir -> the module's image set, read-only
-        #       cacheDir   -> GSI staging dir; writable, and holds images not yet built
+        #       cacheDir   -> writable staging dir, holding images not yet built
         #                     into the module (currently seqkit, needed by split mode)
         #     Nextflow resolves libraryDir first and only falls back to cacheDir, so
         #     module images always win and the staging dir just fills the gaps. Point
@@ -176,7 +162,7 @@ CLIEOF
 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
-// ---- OICR WDL runtime patches (env-var expanded) ----
+// ---- WDL runtime overrides (env-var expanded) ----
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
@@ -204,7 +190,7 @@ process {
 }
 NFEOF
 
-        # 3c. Clamp per-process cpus that exceed OICR's max smp slots.
+        # 3c. Clamp per-process cpus to what the cluster can schedule.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 process {
@@ -212,6 +198,8 @@ process {
     withName: 'PRELUDE_ULTIMA'     { cpus = ~{maxCpus} }
     withName: 'BIOMODAL_COLLAPSE'  { cpus = ~{maxCpus} }
     withName: 'DEEPVARIANT_CALLER' { cpus = ~{maxCpus} }
+    withName: 'ULTIMA_DEDUP'           { cpus = ~{maxCpus} }
+    withName: 'MERGE_LANES_ULTIMA_DEDUP' { cpus = ~{maxCpus} }
 }
 NFEOF
 
@@ -226,13 +214,8 @@ NFEOF
         fi
 
         # 3d. Clamp per-process memory to maxMemory.
-        #     BWA_MEM2 is deliberately NOT in this list -- it gets bwaMem2Memory.
-        #     bwa-mem2 loads its whole index into RAM and needs far more than the
-        #     value that makes PRELUDE schedulable, so one shared cap cannot serve
-        #     both: clamped to the same number as PRELUDE it is killed by the cgroup
-        #     ("failed 52 : cgroups enforced memory limit" in qacct) partway through
-        #     alignment, which surfaces confusingly as "samtools sort: truncated
-        #     file" because bwa dies mid-write and the pipe closes.
+        #     BWA_MEM2 and the dedup steps are NOT in this list: they need more than
+        #     the value that makes PRELUDE schedulable, so they get their own.
         {
             echo ""
             echo "process {"
@@ -245,18 +228,13 @@ NFEOF
                 fi
             done
             echo "    withName: 'BWA_MEM2' { memory = '~{bwaMem2Memory}GB' }"
+            echo "    withName: 'ULTIMA_DEDUP' { memory = '~{dedupMemory}GB' }"
+            echo "    withName: 'MERGE_LANES_ULTIMA_DEDUP' { memory = '~{dedupMemory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
 
-        # 3e. Enable execution tracing here rather than on the command line.
-        #     -with-trace / -with-report are Nextflow CLI options (single dash); the
-        #     biomodal CLI forwards --additional-params as pipeline params (double
-        #     dash), so passing them that way silently does nothing -- .command.trace
-        #     stays empty and no aggregate trace is written. Setting them in the
-        #     config works regardless of how the CLI forwards arguments.
-        #     nf_trace.tsv is the per-process record of runtime, cpu and peak memory,
-        #     which is the only way to size maxMemory/bwaMem2Memory from evidence
-        #     instead of guessing.
+        # 3e. Enable tracing in the config, not on the command line: -with-trace is a
+        #     Nextflow CLI option and the vendor CLI forwards only pipeline params.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 trace {
@@ -324,11 +302,8 @@ SHIMEOF
         export NXF_OPTS="-Xms512m -Xmx8g"
         # Fully offline run: no network fetches at runtime.
         export NXF_OFFLINE=true
-        # One line per event instead of an in-place ANSI progress block. The ANSI
-        # renderer truncates process names to fit the terminal, which makes the
-        # captured stdout nearly useless for telling PRELUDE from BWA_MEM2.
-        # -ansi-log is a Nextflow CLI option, not a pipeline param, so it cannot be
-        # passed through the biomodal CLI's --additional-params; the env var can.
+        # One line per event instead of an in-place ANSI progress block, which
+        # truncates process names in captured stdout.
         export NXF_ANSI_LOG=false
         JAR=$(find "${INSTANCE_DIR}/pipelines/duet/1.7.0a1" -name "nextflow-*-one.jar" 2>/dev/null | head -1 || true)
         if [ -n "${JAR}" ]; then
