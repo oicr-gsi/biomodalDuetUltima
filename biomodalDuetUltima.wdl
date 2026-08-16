@@ -405,7 +405,10 @@ CLIEOF
         #     module images always win and the staging dir just fills the gaps. Point
         #     cacheDir back at ${BIOMODAL_IMAGES_DIR} once the module ships every image.
         #     runOptions replaces the biomodal-shipped one: keep the $TMPDIR->/tmp
-        #     bind, and additionally force TMPDIR=/tmp INSIDE the container.
+        #     bind, force TMPDIR=/tmp inside the container, and bind the reference
+        #     data root. Nextflow only auto-mounts paths it knows are inputs, so
+        #     reference files passed to a tool as a plain path string are invisible
+        #     inside the container without this.
         IMAGES_STAGING_DIR="/.mounts/labs/gsi/src/biomodal/duet_ultima/images"
 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
@@ -414,7 +417,7 @@ CLIEOF
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
-    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp'
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp -B ${BIOMODAL_REF_DATA_DIR}'
 }
 NFEOF
 
