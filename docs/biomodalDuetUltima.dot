@@ -1,0 +1,108 @@
+// biomodalDuetUltima -- workflow diagram source.
+//
+// Render with docs/render.sh:
+//   dot -Tsvg  docs/biomodalDuetUltima.dot -o docs/biomodalDuetUltima.svg   (committed)
+//   dot -Tpng  docs/biomodalDuetUltima.dot -o docs/biomodalDuetUltima.png   (wiki, gitignored)
+//
+// The point of this diagram is WHERE CROMWELL STOPS AND NEXTFLOW STARTS. There are only
+// two WDL tasks, and one of them expands into 51 Nextflow processes -- so a Cromwell run
+// directory has far fewer call- directories than there are tools, which is the thing
+// people misread when they first look at a run.
+//
+// Shapes are load-bearing: rounded blue = WDL task (a Cromwell call- directory),
+// square green = Nextflow process (submitted to SGE by Nextflow, not Cromwell),
+// grey note = data.
+
+digraph biomodalDuetUltima {
+    graph [fontname="Helvetica", fontsize=11, compound=true,
+           nodesep=0.30, ranksep=0.40, labelloc=t, fontcolor="#333333"]
+    node  [fontname="Helvetica", fontsize=10]
+    edge  [fontname="Helvetica", fontsize=9, color="#555555"]
+
+    // ---------------------------------------------------------------- styles
+    // WDL task = a Cromwell call- directory you can find on disk.
+    node [shape=box, style="rounded,filled", fillcolor="#d6e4f0", color="#4a7ba7"]
+    splitCram  [label="splitCram\n(skipped unless splitCramReads > 0\nand exactly one input CRAM)"]
+    stage      [label="runDuet: stage instance dir,\napply patches 1b/1c/3a-3e/4/6b,\nstage CRAMs as lanes"]
+
+    // Data.
+    node [shape=note, style=filled, fillcolor="#f0f0f0", color="#888888"]
+    in_cram    [label="one unaligned Ultima CRAM\n~2.27B reads, ~494 GB"]
+    parts      [label="N CRAM parts + .crai\nreads lacking tp/t0 dropped"]
+    out_bam    [label="genome BAM + .bai"]
+    out_cx     [label="hmc / mc / modc\ncytosine reports + .tbi"]
+    out_vcf    [label="germline VCF + .tbi\n(empty when\ncallGermlineVariants=false)"]
+    out_qc     [label="summary.csv / .html / .xlsx\nmultiqc_report.html\nmetrics_definitions.csv"]
+
+    // Nextflow process = submitted to SGE by Nextflow, inside ONE Cromwell task.
+    node [shape=box, style=filled, fillcolor="#dcecc9", color="#6b8e4e"]
+
+    // ------------------------------------------------- the Nextflow layer
+    subgraph cluster_nf {
+        label = "call-runDuet -- ONE Cromwell task.\nEverything below is a Nextflow process that Nextflow submits to SGE itself."
+        style = "rounded,dashed"
+        color = "#6b8e4e"
+        fontsize = 10
+
+        subgraph cluster_perlane {
+            label = "per pseudo-lane, N-way parallel"
+            style = "rounded,filled"
+            fillcolor = "#f4f9ee"
+            color = "#a8c088"
+            fontsize = 9
+            prelude [label="PRELUDE\nresolve original + copy strand\n~17.6h per 150M-read part"]
+            bwa     [label="BWA_MEM2\n~1.3h"]
+            prelude -> bwa
+        }
+
+        dedup   [label="MERGE_LANES_ULTIMA_DEDUP\nglobal dedup over all lanes\n~17.9h, SERIAL -- the bottleneck",
+                 fillcolor="#f7dcc9", color="#b5723f"]
+        bamlet  [label="BAMLET\n~1.35h"]
+        qc      [label="QUALIMAP_BAMQC | TSS_BIAS\nPICARD_GCBIAS | GENOME_MBIAS"]
+        epi     [label="EPIQUANT_BAM2ZARR -> MODALITY_EXPORT\n-> JOIN_ZARR_STORES\ngenome + long_ctrl + short_ctrl"]
+        summary [label="DQSPY | MULTIQC | PIPELINE_REPORT"]
+
+        bwa    -> dedup
+        dedup  -> bamlet
+        bamlet -> qc
+        bamlet -> epi
+        qc     -> summary
+        epi    -> summary
+    }
+
+    // ---------------------------------------------------------------- wiring
+    in_cram   -> splitCram
+    splitCram -> parts
+    parts     -> stage
+    // The no-split path: inputs go straight to staging as lanes. Condition is stated in
+    // the splitCram node label rather than on this edge -- a long edge label lands on
+    // unrelated nodes.
+    in_cram   -> stage [style=dashed, label="  splitCramReads = -1"]
+
+    stage -> prelude [lhead=cluster_nf]
+
+    // These MUST keep the default constraint=true: the outputs belong at the bottom rank.
+    // Setting constraint=false here frees them to float to rank 0, which puts them above
+    // the input CRAM and drags four edges across the whole page.
+    summary -> out_bam [ltail=cluster_nf]
+    summary -> out_cx  [ltail=cluster_nf]
+    summary -> out_vcf [ltail=cluster_nf]
+    summary -> out_qc  [ltail=cluster_nf]
+    { rank=same; out_bam; out_cx; out_vcf; out_qc }
+
+    // ---------------------------------------------------------------- legend
+    subgraph cluster_legend {
+        label = "legend"
+        style = "rounded"
+        color = "#bbbbbb"
+        fontsize = 9
+        lg_wdl [label="WDL task\n(a Cromwell call- dir)", shape=box,
+                style="rounded,filled", fillcolor="#d6e4f0", color="#4a7ba7"]
+        lg_nf  [label="Nextflow process\n(submitted by Nextflow)", shape=box,
+                style=filled, fillcolor="#dcecc9", color="#6b8e4e"]
+        lg_dat [label="data", shape=note, style=filled,
+                fillcolor="#f0f0f0", color="#888888"]
+        lg_wdl -> lg_nf [style=invis]
+        lg_nf  -> lg_dat [style=invis]
+    }
+}

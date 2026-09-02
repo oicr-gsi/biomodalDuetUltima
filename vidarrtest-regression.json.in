@@ -1,0 +1,370 @@
+[
+    {
+        "arguments": {
+            "biomodalDuetUltima.additionalProfile": "",
+            "biomodalDuetUltima.craiIndexes": null,
+            "biomodalDuetUltima.crams": [
+                {
+                    "contents": {
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
+                        "externalIds": [
+                            {
+                                "id": "TEST",
+                                "provider": "TEST"
+                            }
+                        ]
+                    },
+                    "type": "EXTERNAL"
+                }
+            ],
+            "biomodalDuetUltima.mode": "6bp",
+            "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_01",
+            "biomodalDuetUltima.runDuet.backQualityTrim": null,
+            "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
+            "biomodalDuetUltima.runDuet.callGermlineVariants": false,
+            "biomodalDuetUltima.runDuet.dedupMemory": null,
+            "biomodalDuetUltima.runDuet.frontQualityTrim": null,
+            "biomodalDuetUltima.runDuet.gvcfScatterCount": null,
+            "biomodalDuetUltima.runDuet.hpMaxErrorRate": null,
+            "biomodalDuetUltima.runDuet.hpMinOverlap": null,
+            "biomodalDuetUltima.runDuet.jobMemory": null,
+            "biomodalDuetUltima.runDuet.maskEndCs": null,
+            "biomodalDuetUltima.runDuet.maxCpus": null,
+            "biomodalDuetUltima.runDuet.maxMemory": null,
+            "biomodalDuetUltima.runDuet.maxTime": null,
+            "biomodalDuetUltima.runDuet.meanQualityR1": null,
+            "biomodalDuetUltima.runDuet.meanQualityR2": null,
+            "biomodalDuetUltima.runDuet.splitReadsPreResolution": null,
+            "biomodalDuetUltima.runDuet.timeout": null,
+            "biomodalDuetUltima.runDuet.variantCaller": null,
+            "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
+            "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.splitCram.cores": null,
+            "biomodalDuetUltima.splitCram.ioSlots": null,
+            "biomodalDuetUltima.splitCram.jobMemory": null,
+            "biomodalDuetUltima.splitCram.timeout": null,
+            "biomodalDuetUltima.splitCramReads": -1
+        },
+        "description": "biomodalDuetUltima test_01 single lane, no split",
+        "engineArguments": {
+            "write_to_cache": false,
+            "read_from_cache": false
+        },
+        "id": "biomodalDuetUltima_test_01",
+        "metadata": {
+            "biomodalDuetUltima.outputBam": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.outputBai": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.hmc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.hmc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.mc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.mc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.modc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.modc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.vcf": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.vcfIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryCsv": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryHtml": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryXlsx": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.multiqcReport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.metricsDefinitions": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            }
+        },
+        "validators": [
+            {
+                "metrics_calculate": "@CHECKOUT@/tests/calculate.sh",
+                "metrics_compare": "@CHECKOUT@/tests/compare.sh",
+                "output_metrics": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/output_metrics/workflow_test_01.metrics",
+                "type": "script"
+            }
+        ]
+    },
+    {
+        "arguments": {
+            "biomodalDuetUltima.additionalProfile": "",
+            "biomodalDuetUltima.craiIndexes": null,
+            "biomodalDuetUltima.crams": [
+                {
+                    "contents": {
+                        "configuration": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/test_data/46433161-Z0001-subsample.cram",
+                        "externalIds": [
+                            {
+                                "id": "TEST",
+                                "provider": "TEST"
+                            }
+                        ]
+                    },
+                    "type": "EXTERNAL"
+                }
+            ],
+            "biomodalDuetUltima.mode": "6bp",
+            "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_02",
+            "biomodalDuetUltima.runDuet.backQualityTrim": null,
+            "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
+            "biomodalDuetUltima.runDuet.callGermlineVariants": false,
+            "biomodalDuetUltima.runDuet.dedupMemory": null,
+            "biomodalDuetUltima.runDuet.frontQualityTrim": null,
+            "biomodalDuetUltima.runDuet.gvcfScatterCount": null,
+            "biomodalDuetUltima.runDuet.hpMaxErrorRate": null,
+            "biomodalDuetUltima.runDuet.hpMinOverlap": null,
+            "biomodalDuetUltima.runDuet.jobMemory": null,
+            "biomodalDuetUltima.runDuet.maskEndCs": null,
+            "biomodalDuetUltima.runDuet.maxCpus": null,
+            "biomodalDuetUltima.runDuet.maxMemory": null,
+            "biomodalDuetUltima.runDuet.maxTime": null,
+            "biomodalDuetUltima.runDuet.meanQualityR1": null,
+            "biomodalDuetUltima.runDuet.meanQualityR2": null,
+            "biomodalDuetUltima.runDuet.splitReadsPreResolution": null,
+            "biomodalDuetUltima.runDuet.timeout": null,
+            "biomodalDuetUltima.runDuet.variantCaller": null,
+            "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
+            "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.splitCram.cores": null,
+            "biomodalDuetUltima.splitCram.ioSlots": null,
+            "biomodalDuetUltima.splitCram.jobMemory": null,
+            "biomodalDuetUltima.splitCram.timeout": null,
+            "biomodalDuetUltima.splitCramReads": 100000
+        },
+        "description": "biomodalDuetUltima test_02 split into pseudo-lanes",
+        "engineArguments": {
+            "write_to_cache": false,
+            "read_from_cache": false
+        },
+        "id": "biomodalDuetUltima_test_02",
+        "metadata": {
+            "biomodalDuetUltima.outputBam": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.outputBai": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.hmc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.hmc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.mc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.mc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.modc_cxreport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.modc_cxreportIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.vcf": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.vcfIndex": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryCsv": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryHtml": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.summaryXlsx": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.multiqcReport": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.metricsDefinitions": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            }
+        },
+        "validators": [
+            {
+                "metrics_calculate": "@CHECKOUT@/tests/calculate.sh",
+                "metrics_compare": "@CHECKOUT@/tests/compare.sh",
+                "output_metrics": "/.mounts/labs/gsi/testdata/biomodalDuetUltima/output_metrics/workflow_test_02.metrics",
+                "type": "script"
+            }
+        ]
+    }
+]
