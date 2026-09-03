@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-03
+
+### Added
+
+- `scheduler`, `slurmPartition`, `slurmAccount`, `processBeforeScript` and
+  `imagesStagingDir`, so the workflow runs on slurm as well as sge. `scheduler`
+  accepts `sge` (the default, unchanged behaviour), `slurm`, `slurm-gcp`, or `auto`
+  to resolve from the submit command the cluster provides. It is decided before any
+  work is done, and the submit command is checked for, so a setting the cluster
+  cannot satisfy fails at once rather than at the first process submission.
+- `slurm-gcp` differs from `slurm` in its defaults only: it takes `compute` as the
+  partition and sends no accounting group, which is how a cloud slurm deployment is
+  normally configured. `slurm` requires `slurmPartition`, because the pipeline's own
+  slurm profile names a queue that exists only at the vendor's site. `auto`
+  distinguishes the two from the machine's firmware identity, which is a local file
+  read; resolving the cloud metadata hostname is deliberately not used, as a
+  resolver that answers wildcards reports a cloud instance where there is none.
+- The task writes the executor settings itself and appends them last, so no config
+  file has to be placed on the cluster to change scheduler. For slurm it also
+  answers `data_path`, `work_path` and `reference_path`, which the pipeline's slurm
+  profile points at the vendor's own installation, and sets a `beforeScript` that
+  gives `TMPDIR` a value: Grid Engine always sets it and slurm does not, and the
+  container run options bind it. `processBeforeScript` is appended to that rather
+  than replacing it, so a site that has to put its container runtime on PATH keeps
+  the guard.
+- `clusterOptions` and `time` are replaced on every `withName` selector that sets
+  them, not just on the generic scope, since a generic assignment does not reach a
+  selector. The selectors are found rather than listed, so a pipeline upgrade that
+  adds one is covered.
+
+### Changed
+
+- The `penv`/`h_vmem` cluster options and the `qsub` shim are now written only for
+  sge. Both exist to work around `h_vmem` being a per-slot limit and Nextflow's SGE
+  executor emitting RSS directives alongside it; slurm's `--mem` is per job and has
+  no equivalent, so neither is generated there.
+- The container image staging directory is an input rather than a fixed path, so a
+  site other than the one the module was built for can supply its own.
+
 ## [1.0.0] - 2026-08-12
 
 ### Added

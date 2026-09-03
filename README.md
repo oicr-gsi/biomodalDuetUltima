@@ -37,6 +37,11 @@ Parameter|Value|Default|Description
 `modules`|String|"biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"|Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)
 `splitCramReads`|Int|-1|If >0, split the single input CRAM into parts of this many reads and present them to the pipeline as separate lanes, so PRELUDE and BWA_MEM2 run per part in parallel. Faster than the pipeline's own split_reads_pre_resolution, which converts CRAM to FASTQ first. Requires exactly one input CRAM. Default -1 (off).
 `craiIndexes`|Array[File]?|None|Optional pre-built .crai, one per entry of crams, matched by basename. Used only when splitCram does not run; supply it when re-running against parts an earlier splitCram produced, to skip re-indexing.
+`scheduler`|String|"sge"|Which scheduler Nextflow submits its own jobs to: sge, slurm, slurm-gcp, or auto to decide from the submit command the cluster provides and whether the node is a cloud instance. slurm-gcp differs from slurm only in its defaults. Default sge.
+`slurmPartition`|String|""|Partition Nextflow submits its own jobs to. Required when scheduler is slurm, because the pipeline's slurm profile names a queue that exists only at the vendor's own site. Defaults to compute under slurm-gcp.
+`slurmAccount`|String|""|Accounting group for the jobs Nextflow submits, where the site enforces one. Ignored under sge.
+`processBeforeScript`|String|""|Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge.
+`imagesStagingDir`|String|""|Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image.
 
 
 #### Optional task parameters:
@@ -148,6 +153,93 @@ This section lists command(s) run by biomodalDuetUltima workflow
         set -euo pipefail
 
         # ---------------------------------------------------------------------------
+        # 0. Which scheduler Nextflow submits its own jobs to. Resolved before any work
+        #    is done, so a setting the cluster cannot satisfy fails here rather than
+        #    hours later at the first process submission.
+        #      sge       Grid Engine. Needs the h_vmem clusterOptions and the qsub shim
+        #                in block 4: h_vmem is a per-slot limit, and the RSS directives
+        #                Nextflow generates from the memory directive re-impose the
+        #                cgroup kill those work around.
+        #      slurm     Slurm at a site that schedules its own partitions and accounts.
+        #      slurm-gcp Slurm on a cloud instance, where nodes are created on demand and
+        #                accounting is usually not enforced. Differs from slurm in its
+        #                defaults only; both generate the same executor settings.
+        #      auto      Decide from the submit command the cluster provides, then from
+        #                whether this node is a cloud instance.
+        # ---------------------------------------------------------------------------
+        SCHEDULER="~{scheduler}"
+
+        if [ "${SCHEDULER}" = "auto" ]; then
+            if command -v sbatch >/dev/null 2>&1; then
+                # The firmware identity of the machine: on a Google Compute Engine
+                # instance product_name reads "Google Compute Engine" and sys_vendor
+                # reads "Google". Both are plain local file reads that cost nothing off
+                # the cloud. Resolving the metadata hostname is NOT used as a signal:
+                # a resolver that answers wildcards returns the metadata address on a
+                # machine that is not an instance at all.
+                if grep -qi google /sys/class/dmi/id/product_name 2>/dev/null \
+                   || grep -qi google /sys/class/dmi/id/sys_vendor 2>/dev/null; then
+                    SCHEDULER=slurm-gcp
+                else
+                    SCHEDULER=slurm
+                fi
+            elif command -v qsub >/dev/null 2>&1; then
+                SCHEDULER=sge
+            else
+                echo "ERROR: scheduler=auto, but neither sbatch nor qsub is on PATH." >&2
+                echo "       Set the scheduler input to sge, slurm or slurm-gcp." >&2
+                exit 1
+            fi
+            echo "Detected scheduler: ${SCHEDULER}"
+        fi
+
+        SLURM_PARTITION="~{slurmPartition}"
+        SLURM_ONLY=()
+        [ -z "~{slurmPartition}" ]      || SLURM_ONLY+=("slurmPartition")
+        [ -z "~{slurmAccount}" ]        || SLURM_ONLY+=("slurmAccount")
+        [ -z "~{processBeforeScript}" ] || SLURM_ONLY+=("processBeforeScript")
+
+        case "${SCHEDULER}" in
+            sge)
+                PLATFORM_TYPE=sge
+                if ! command -v qsub >/dev/null 2>&1; then
+                    echo "ERROR: scheduler=sge, but qsub is not on PATH. Nextflow would have" >&2
+                    echo "       nothing to submit to. Set scheduler to slurm, slurm-gcp or auto." >&2
+                    exit 1
+                fi
+                # Ignored rather than refused, so one set of inputs can carry the slurm
+                # settings and still run where they do not apply.
+                if [ "${#SLURM_ONLY[@]}" -gt 0 ]; then
+                    echo "Note: $(IFS=,; echo "${SLURM_ONLY[*]}") ignored; those apply only to slurm"
+                fi
+                ;;
+            slurm|slurm-gcp)
+                PLATFORM_TYPE=slurm
+                if ! command -v sbatch >/dev/null 2>&1; then
+                    echo "ERROR: scheduler=${SCHEDULER}, but sbatch is not on PATH. Nextflow would" >&2
+                    echo "       have nothing to submit to. Set scheduler to sge or auto." >&2
+                    exit 1
+                fi
+                if [ -z "${SLURM_PARTITION}" ]; then
+                    if [ "${SCHEDULER}" = "slurm-gcp" ]; then
+                        # The general-purpose partition a cloud Slurm deployment ships.
+                        SLURM_PARTITION=compute
+                        echo "slurmPartition not set, using ${SLURM_PARTITION}"
+                    else
+                        echo "ERROR: scheduler=slurm requires slurmPartition. The pipeline's slurm" >&2
+                        echo "       profile names a queue that exists only at the vendor's own site," >&2
+                        echo "       so leaving it unset submits to a queue that is not there." >&2
+                        exit 1
+                    fi
+                fi
+                ;;
+            *)
+                echo "ERROR: scheduler must be sge, slurm, slurm-gcp or auto, got '${SCHEDULER}'" >&2
+                exit 1
+                ;;
+        esac
+
+        # ---------------------------------------------------------------------------
         # 1. Build a writable instance directory. The biomodal CLI needs writable
         #    copies of the two config files it rewrites, plus a real (symlink-free)
         #    pipelines/ tree -- Nextflow cannot follow symlinks for includeConfig
@@ -225,7 +317,7 @@ PYEOF
             images_registry_location: ${BIOMODAL_IMAGES_DIR}
             nextflow_work_directory_location: $(pwd)/work
             reference_files_location: ${BIOMODAL_REF_DATA_DIR}
-            type: sge
+            type: ${PLATFORM_TYPE}
         pipelines:
             duet:
                 version: 1.7.0a1
@@ -237,6 +329,10 @@ CLIEOF
         # ---------------------------------------------------------------------------
         # 3. Append cluster runtime overrides to nextflow_override.config.
         # ---------------------------------------------------------------------------
+        # The reference bundle the pipeline reads:
+        # <reference_files_location>/<ref_pipeline_version>_<ref_genome>.
+        REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
+
 
         # 3a. Apptainer image lookup, so containers are reused rather than re-pulled:
         #       libraryDir -> the module's image set, read-only
@@ -250,7 +346,8 @@ CLIEOF
         #     data root. Nextflow only auto-mounts paths it knows are inputs, so
         #     reference files passed to a tool as a plain path string are invisible
         #     inside the container without this.
-        IMAGES_STAGING_DIR="/.mounts/labs/gsi/src/biomodal/duet_ultima/images"
+        IMAGES_STAGING_DIR="~{imagesStagingDir}"
+        [ -n "${IMAGES_STAGING_DIR}" ] || IMAGES_STAGING_DIR="${BIOMODAL_IMAGES_DIR}"
 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
@@ -262,25 +359,121 @@ apptainer {
 }
 NFEOF
 
-        # 3b. Literal Groovy block (no shell expansion). Appended last so it is the
-        #     final word on penv / clusterOptions, overriding any biomodal-shipped
-        #     process{} defaults.
-        #       - NUMBA_CACHE_DIR container env (required by this release).
-        #       - penv = 'smp'                       (UGE parallel-environment policy, 1.2)
-        #       - clusterOptions schedules on h_vmem  (cgroup memory-kill fix)
-        #         and retains -S /bin/bash + -P gsi   (UGE project-name policy)
+        # 3b. Settings that apply whichever scheduler runs the processes. Appended
+        #     after the section the biomodal CLI generates, so these are the final word
+        #     on any directive both set.
+        #       - NUMBA_CACHE_DIR container env (required by this release)
+        #       - time bounds every process, in a unit both executors understand
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
     containerOptions = '--env NUMBA_CACHE_DIR=/tmp/numba_cache'
+    time             = '~{maxTime}h'
 }
+NFEOF
+
+        # 3b-i. Executor settings, generated per run so nothing has to be placed on the
+        #       cluster to move the workflow between schedulers.
+        #       sge:   penv names the parallel environment; h_vmem is a PER-SLOT limit,
+        #              so the request is divided by the slot count before it is asked
+        #              for. Without that division a multi-slot process reserves its
+        #              whole memory figure on every slot and is refused or killed.
+        #       slurm: queue is the partition, and an account is sent only where the
+        #              site enforces accounting. The memory directive maps to --mem,
+        #              which is per job, so none of the sge arithmetic applies and the
+        #              qsub shim in block 4 is not needed either.
+        SLURM_CLUSTER_OPTIONS=""
+
+        if [ "${SCHEDULER}" = "sge" ]; then
+            cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
     penv           = 'smp'
-    time           = '~{maxTime}h'
     clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toMega().intdiv(task.cpus)}M" }
 }
 NFEOF
+        else
+            [ -z "~{slurmAccount}" ] || SLURM_CLUSTER_OPTIONS="--account=~{slurmAccount}"
+
+            # beforeScript runs on the host ahead of the container launch. Grid Engine
+            # always sets TMPDIR; Slurm does not, and the runOptions above bind it, so
+            # an unset value would bind an empty path and fail every process. The
+            # caller's script is appended rather than substituted, so a site that has to
+            # put its container runtime on PATH does not lose the guard.
+            SLURM_BEFORE='export TMPDIR="${TMPDIR:-/tmp}"'
+            if [ -n "~{processBeforeScript}" ]; then
+                SLURM_BEFORE="${SLURM_BEFORE}
+~{processBeforeScript}"
+            fi
+
+            # Triple single quotes make a Groovy string with no interpolation, so the
+            # ${TMPDIR} above reaches the shell rather than Nextflow.
+            cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+
+process {
+    executor       = 'slurm'
+    queue          = '${SLURM_PARTITION}'
+    clusterOptions = '${SLURM_CLUSTER_OPTIONS}'
+    beforeScript   = '''${SLURM_BEFORE}'''
+}
+
+// The slurm profile points these at the vendor's own installation, where the sge
+// profile leaves them empty for the CLI to fill. Both have to be answered here so a
+// slurm run reads the reference bundle and writes its work tree in the right place.
+params {
+    data_path      = '$(pwd)'
+    work_path      = '$(pwd)/work'
+    reference_path = '${REFERENCE_PATH}'
+}
+NFEOF
+        fi
+
+        # 3b-ii. A generic assignment does not reach a withName selector, so a directive
+        #        already set on one keeps the pipeline's value -- for clusterOptions that
+        #        is the other scheduler's syntax, which the submit command rejects. The
+        #        selectors are found rather than listed, so a pipeline upgrade that adds
+        #        one is covered without editing this file.
+        SEL_SCHEDULER="${SCHEDULER}" \
+        SEL_CLUSTER_OPTIONS="${SLURM_CLUSTER_OPTIONS}" \
+        SEL_TIME="~{maxTime}h" \
+        SEL_PIPELINE_DIR="${INSTANCE_DIR}/pipelines/duet/1.7.0a1" \
+        SEL_OVERRIDE_CONFIG="${INSTANCE_DIR}/nextflow_override.config" \
+        python3 << 'SELEOF'
+import os, pathlib, re
+
+override = pathlib.Path(os.environ["SEL_OVERRIDE_CONFIG"])
+pipeline_dir = pathlib.Path(os.environ["SEL_PIPELINE_DIR"])
+sources = [override.read_text()]
+sources += [f.read_text() for f in sorted(pipeline_dir.glob("*.config"))]
+sources += [f.read_text() for f in sorted(pipeline_dir.glob("conf/*.config"))]
+
+
+def selectors_setting(directive):
+    found = []
+    for src in sources:
+        for m in re.finditer(r"withName:\s*'([^']+)'\s*\{([^{}]*)\}", src, re.S):
+            if re.search(r"\b%s\s*=" % directive, m.group(2)) and m.group(1) not in found:
+                found.append(m.group(1))
+    return found
+
+
+per_selector = {}
+if os.environ["SEL_SCHEDULER"] != "sge":
+    for name in selectors_setting("clusterOptions"):
+        per_selector.setdefault(name, []).append(
+            "clusterOptions = '%s'" % os.environ["SEL_CLUSTER_OPTIONS"])
+for name in selectors_setting("time"):
+    per_selector.setdefault(name, []).append("time = '%s'" % os.environ["SEL_TIME"])
+
+if per_selector:
+    lines = ["", "process {"]
+    lines += ["    withName: '%s' { %s }" % (n, "; ".join(a))
+              for n, a in per_selector.items()]
+    lines += ["}", ""]
+    with override.open("a") as fh:
+        fh.write("\n".join(lines))
+    print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
+SELEOF
 
         # 3c. Clamp per-process cpus to what the cluster can schedule.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
@@ -350,14 +543,16 @@ timeline {
 NFEOF
 
         # ---------------------------------------------------------------------------
-        # 4. qsub shim (cgroup memory-kill fix).
-        #    clusterOptions above is CONCATENATED onto the s_rss/h_rss/mem_free
-        #    directives Nextflow's SGE executor generates from the memory directive;
-        #    those re-impose the cgroup RSS limit and must be stripped before qsub.
-        #    Install a wrapper named qsub earlier on PATH than the real one; it edits
-        #    each .command.run in place (next to the script, on NFS visible to exec
-        #    nodes) and re-submits to the real qsub.
+        # 4. qsub shim (cgroup memory-kill fix). Grid Engine only: it exists because
+        #    the clusterOptions above is CONCATENATED onto the s_rss/h_rss/mem_free
+        #    directives Nextflow's SGE executor generates from the memory directive,
+        #    and those re-impose the cgroup RSS limit and must be stripped before qsub.
+        #    Slurm's --mem carries no such companion directives, so nothing is wrapped
+        #    there. Install a wrapper named qsub earlier on PATH than the real one; it
+        #    edits each .command.run in place (next to the script, on shared storage
+        #    visible to exec nodes) and re-submits to the real qsub.
         # ---------------------------------------------------------------------------
+        if [ "${SCHEDULER}" = "sge" ]; then
         mkdir -p ./bin
         cat > ./bin/qsub << 'SHIMEOF'
 #!/bin/bash
@@ -386,6 +581,7 @@ fi
 SHIMEOF
         chmod +x ./bin/qsub
         export PATH="$(pwd)/bin:$PATH"
+        fi
 
         # ---------------------------------------------------------------------------
         # 5. Writable NXF_HOME, pre-seeded with the bundled Nextflow framework jar.
@@ -463,12 +659,9 @@ SHIMEOF
         fi
 
         # ---------------------------------------------------------------------------
-        # 7. Run biomodal DUET in Ultima mode.
-        #    reference_path is <ref_data>/<ref_pipeline_version>_<ref_genome> =
-        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy 
+        # 7. Run biomodal DUET in Ultima mode. REFERENCE_PATH is set in block 3.
         # ---------------------------------------------------------------------------
         mkdir -p nf-results
-        REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
 
         # Fail fast if DeepVariant germline calling is requested but its Ultima model
         # is absent from the reference bundle.  Add the model under

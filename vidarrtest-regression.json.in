@@ -17,9 +17,11 @@
                     "type": "EXTERNAL"
                 }
             ],
+            "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_01",
+            "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
             "biomodalDuetUltima.runDuet.callGermlineVariants": false,
@@ -40,6 +42,9 @@
             "biomodalDuetUltima.runDuet.variantCaller": null,
             "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
             "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.scheduler": null,
+            "biomodalDuetUltima.slurmAccount": null,
+            "biomodalDuetUltima.slurmPartition": null,
             "biomodalDuetUltima.splitCram.cores": null,
             "biomodalDuetUltima.splitCram.ioSlots": null,
             "biomodalDuetUltima.splitCram.jobMemory": null,
@@ -201,9 +206,11 @@
                     "type": "EXTERNAL"
                 }
             ],
+            "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_02",
+            "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
             "biomodalDuetUltima.runDuet.callGermlineVariants": false,
@@ -224,6 +231,9 @@
             "biomodalDuetUltima.runDuet.variantCaller": null,
             "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
             "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.scheduler": null,
+            "biomodalDuetUltima.slurmAccount": null,
+            "biomodalDuetUltima.slurmPartition": null,
             "biomodalDuetUltima.splitCram.cores": null,
             "biomodalDuetUltima.splitCram.ioSlots": null,
             "biomodalDuetUltima.splitCram.jobMemory": null,
