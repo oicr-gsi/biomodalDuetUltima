@@ -42,6 +42,7 @@ Parameter|Value|Default|Description
 `slurmAccount`|String|""|Accounting group for the jobs Nextflow submits, where the site enforces one. Ignored under sge.
 `processBeforeScript`|String|""|Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge.
 `imagesStagingDir`|String|""|Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image.
+`containerAutoMounts`|Boolean|true|Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true.
 
 
 #### Optional task parameters:
@@ -342,12 +343,37 @@ CLIEOF
         #     module images always win and the staging dir just fills the gaps. Point
         #     cacheDir back at ${BIOMODAL_IMAGES_DIR} once the module ships every image.
         #     runOptions replaces the biomodal-shipped one: keep the $TMPDIR->/tmp
-        #     bind, force TMPDIR=/tmp inside the container, and bind the reference
-        #     data root. Nextflow only auto-mounts paths it knows are inputs, so
+        #     bind, force TMPDIR=/tmp inside the container, and bind every path the
+        #     run reads. Nextflow only auto-mounts paths it knows are inputs, so
         #     reference files passed to a tool as a plain path string are invisible
         #     inside the container without this.
         IMAGES_STAGING_DIR="~{imagesStagingDir}"
         [ -n "${IMAGES_STAGING_DIR}" ] || IMAGES_STAGING_DIR="${BIOMODAL_IMAGES_DIR}"
+
+        # Bind points listed one by one rather than left to Nextflow, which derives
+        # its list from the paths a task touches and then collapses them into their
+        # common parents. Where the execution tree and the installed software sit
+        # under a single top-level directory, that directory is what gets bound, and
+        # if the image has its own copy the host's hides it -- every tool inside
+        # disappears. Naming the paths individually never collapses. Both the staged
+        # input path and what it resolves to are bound, because staging is by symlink
+        # and the container has to follow it.
+        {
+            pwd
+            echo "${BIOMODAL_REF_DATA_DIR}"
+            for f in ~{sep=' ' crams} ~{sep=' ' craiList}; do
+                # Both resolved, so a bind is never a relative path.
+                readlink -f "$(dirname "${f}")"
+                dirname "$(readlink -f "${f}")"
+            done
+        } | sort -u > container_binds.txt
+
+        CONTAINER_BINDS=""
+        while IFS= read -r bind_dir; do
+            [ -n "${bind_dir}" ] || continue
+            CONTAINER_BINDS="${CONTAINER_BINDS} -B ${bind_dir}"
+        done < container_binds.txt
+        echo "Container bind points:${CONTAINER_BINDS}"
 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
@@ -355,7 +381,8 @@ CLIEOF
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
-    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS= -B ${BIOMODAL_REF_DATA_DIR}'
+    autoMounts = ~{containerAutoMounts}
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS=${CONTAINER_BINDS}'
 }
 NFEOF
 

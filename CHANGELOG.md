@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `containerAutoMounts`, defaulting to true. Nextflow derives its container bind
+  points from the paths a task touches and collapses them into their common parents.
+  Where the execution tree and the installed software sit under a single top-level
+  directory, that directory is what gets bound -- and if the image has its own copy,
+  the host's hides it and every tool inside disappears. Set it false there. The task
+  now lists its bind points individually in `runOptions` regardless, so turning the
+  derivation off loses nothing: the working directory, the reference bundle, and both
+  the staged and resolved locations of every input are bound by name.
+
+
 - The JVM's cgroup probe throws a `NullPointerException` where a cgroup v2 hierarchy
   is present but exposes no controller the JDK recognises, which is how a
   scheduler-created job cgroup can look. Nextflow reaches it while printing system
