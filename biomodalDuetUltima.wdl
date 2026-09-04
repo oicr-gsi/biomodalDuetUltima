@@ -283,13 +283,14 @@ task runDuet {
         Int meanQualityR1 = 15
         Int meanQualityR2 = 15
         Int maskEndCs  = 5
-        Boolean callGermlineVariants = true
+        Boolean callGermlineVariants = false
         String variantCaller = "deepvariant"
         Int maxCpus = 16
         Int maxMemory = 64
         Int bwaMem2Memory = 40
         Int dedupMemory = 40
         Int maxTime = 48
+        Int processMaxRetries = 2
         Int splitReadsPreResolution = -1
         Int gvcfScatterCount = 20
         Int jobMemory = 16
@@ -319,7 +320,7 @@ task runDuet {
         meanQualityR1: "prelude.mean_quality_R1: minimum mean quality below which an R1 read is discarded"
         meanQualityR2: "prelude.mean_quality_R2: minimum mean quality below which an R2 read is discarded"
         maskEndCs: "prelude.mask_end_cs: mask Cs in the last n bases at the tail of reads to improve methylation-calling sensitivity"
-        callGermlineVariants: "Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)"
+        callGermlineVariants: "Whether to run germline variant calling at all. Defaults to FALSE, unlike the pipeline itself, so a methylation run does not pay for calls it was not asked for. The DeepVariant path runs as ONE unscattered process taking --num_shards from its cpus, and no GPU is requested anywhere in the pipeline, so on a deeply sequenced sample it can dominate the run and push the whole workflow past its wall-time limit -- which loses the methylation outputs too, since those are only collected once the pipeline returns."
         variantCaller: "Germline variant caller: deepvariant (Ultima-trained model), gatk, or both"
         maxCpus: "Cap on per-process cpus for the heavy pipeline steps, which request 32-96 by default. Lower it so those steps fit the nodes available on your cluster."
         maxMemory: "Cap (GB) on per-process memory for the heavy pipeline steps, which request 32-64GB by default. Only reduces, so the default 64 is a no-op; lower it to fit smaller nodes. Does not apply to BWA_MEM2 or the dedup steps, which have their own settings."
@@ -329,6 +330,7 @@ task runDuet {
         gvcfScatterCount: "Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default)."
         jobMemory: "Memory in GB for the head (Nextflow driver) task"
         maxTime: "Wall-time limit in hours applied to every Nextflow process. Distinct from timeout, which bounds the head task."
+        processMaxRetries: "How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost node ends every parallel branch. On a cluster whose nodes are created on demand that is routine churn rather than bad luck. Set 0 to restore the shipped behaviour."
         timeout: "Wall-time limit in hours for the head (Nextflow driver) task. Must exceed the runtime of the whole pipeline, not just one process."
     }
 
@@ -726,6 +728,21 @@ NFEOF
             echo "    withName: 'MERGE_LANES_ULTIMA_DEDUP' { memory = '~{dedupMemory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
+
+        # 3f. Retry a process that failed without saying why. A task killed along with
+        #     its node reports no exit status at all; the shipped policy tests only for
+        #     particular statuses, so a null one falls through to terminate and a single
+        #     lost node ends every branch running beside it. Retry those, and keep
+        #     terminate for a tool that genuinely failed. The backoff matches the
+        #     shipped policy.
+        cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
+
+process {
+    errorStrategy = { sleep(Math.pow(2, task.attempt as int) as long)
+                      return (task.exitStatus == null || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
+    maxRetries    = ~{processMaxRetries}
+}
+NFEOF
 
         # 3e. Enable tracing in the config, not on the command line: -with-trace is a
         #     Nextflow CLI option and the vendor CLI forwards only pipeline params.

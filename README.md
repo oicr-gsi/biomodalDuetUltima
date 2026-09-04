@@ -59,13 +59,14 @@ Parameter|Value|Default|Description
 `runDuet.meanQualityR1`|Int|15|prelude.mean_quality_R1: minimum mean quality below which an R1 read is discarded
 `runDuet.meanQualityR2`|Int|15|prelude.mean_quality_R2: minimum mean quality below which an R2 read is discarded
 `runDuet.maskEndCs`|Int|5|prelude.mask_end_cs: mask Cs in the last n bases at the tail of reads to improve methylation-calling sensitivity
-`runDuet.callGermlineVariants`|Boolean|true|Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)
+`runDuet.callGermlineVariants`|Boolean|false|Whether to run germline variant calling at all. Defaults to FALSE, unlike the pipeline itself, so a methylation run does not pay for calls it was not asked for. The DeepVariant path runs as ONE unscattered process taking --num_shards from its cpus, and no GPU is requested anywhere in the pipeline, so on a deeply sequenced sample it can dominate the run and push the whole workflow past its wall-time limit -- which loses the methylation outputs too, since those are only collected once the pipeline returns.
 `runDuet.variantCaller`|String|"deepvariant"|Germline variant caller: deepvariant (Ultima-trained model), gatk, or both
 `runDuet.maxCpus`|Int|16|Cap on per-process cpus for the heavy pipeline steps, which request 32-96 by default. Lower it so those steps fit the nodes available on your cluster.
 `runDuet.maxMemory`|Int|64|Cap (GB) on per-process memory for the heavy pipeline steps, which request 32-64GB by default. Only reduces, so the default 64 is a no-op; lower it to fit smaller nodes. Does not apply to BWA_MEM2 or the dedup steps, which have their own settings.
 `runDuet.bwaMem2Memory`|Int|40|Memory in GB for BWA_MEM2, set independently of maxMemory. bwa-mem2 loads its whole index into memory (~16GB) regardless of input size, so it needs more than the other steps and is killed if given less.
 `runDuet.dedupMemory`|Int|40|Memory in GB for the deduplication steps, set independently of maxMemory. The pipeline requests 128GB but the step is I/O-bound and uses far less, so the default request restricts it to large nodes for no benefit.
 `runDuet.maxTime`|Int|48|Wall-time limit in hours applied to every Nextflow process. Distinct from timeout, which bounds the head task.
+`runDuet.processMaxRetries`|Int|2|How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost node ends every parallel branch. On a cluster whose nodes are created on demand that is routine churn rather than bad luck. Set 0 to restore the shipped behaviour.
 `runDuet.splitReadsPreResolution`|Int|-1|If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off).
 `runDuet.gvcfScatterCount`|Int|20|Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default).
 `runDuet.jobMemory`|Int|16|Memory in GB for the head (Nextflow driver) task
@@ -544,6 +545,21 @@ NFEOF
             echo "    withName: 'MERGE_LANES_ULTIMA_DEDUP' { memory = '~{dedupMemory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
+
+        # 3f. Retry a process that failed without saying why. A task killed along with
+        #     its node reports no exit status at all; the shipped policy tests only for
+        #     particular statuses, so a null one falls through to terminate and a single
+        #     lost node ends every branch running beside it. Retry those, and keep
+        #     terminate for a tool that genuinely failed. The backoff matches the
+        #     shipped policy.
+        cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
+
+process {
+    errorStrategy = { sleep(Math.pow(2, task.attempt as int) as long)
+                      return (task.exitStatus == null || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
+    maxRetries    = ~{processMaxRetries}
+}
+NFEOF
 
         # 3e. Enable tracing in the config, not on the command line: -with-trace is a
         #     Nextflow CLI option and the vendor CLI forwards only pipeline params.

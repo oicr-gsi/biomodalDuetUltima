@@ -60,6 +60,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `processMaxRetries` (default 2) and a retry policy that covers a process failing
+  without an exit status. A task killed along with the node under it reports none, and
+  the shipped policy tests only for particular statuses, so that case fell through to
+  `terminate` -- one lost node ended every branch running beside it. Where nodes are
+  created on demand that is routine churn, not bad luck. Genuine tool failures still
+  terminate; set it to 0 for the shipped behaviour.
+- `callGermlineVariants` now defaults to FALSE, where the pipeline's own default is to
+  call. DeepVariant here runs as one unscattered process taking `--num_shards` from its
+  cpus, and no GPU is requested anywhere in the pipeline, so on a deeply sequenced sample
+  it can dominate the run and push the whole workflow past its wall-time limit -- which
+  loses the methylation outputs as well, since those are collected only after the pipeline
+  returns. A methylation run should not pay for calls it was not asked for. Set it true
+  where germline calls are wanted, and give the step enough cpus when doing so.
 - The `penv`/`h_vmem` cluster options and the `qsub` shim are now written only for
   sge. Both exist to work around `h_vmem` being a per-slot limit and Nextflow's SGE
   executor emitting RSS directives alongside it; slurm's `--mem` is per job and has
