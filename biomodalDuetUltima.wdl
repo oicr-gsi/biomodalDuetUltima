@@ -533,7 +533,7 @@ CLIEOF
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
-    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp -B ${BIOMODAL_REF_DATA_DIR}'
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS= -B ${BIOMODAL_REF_DATA_DIR}'
 }
 NFEOF
 
@@ -765,7 +765,17 @@ SHIMEOF
         # 5. Writable NXF_HOME, pre-seeded with the bundled Nextflow framework jar.
         # ---------------------------------------------------------------------------
         export NXF_HOME="$(pwd)/nxf_home"
-        export NXF_OPTS="-Xms512m -Xmx8g"
+        # -XX:-UseContainerSupport disables the JVM's cgroup probe, which throws a
+        # NullPointerException where a cgroup v2 hierarchy is present but exposes no
+        # controller the JDK recognises -- how a scheduler-created job cgroup can look.
+        # Nextflow reaches it while printing system information at startup, so the run
+        # dies before submitting any process. Disabling it is safe here: the flag only
+        # governs cgroup-derived defaults for heap size and processor count, and the
+        # heap is set explicitly above. Passed by two routes because NXF_OPTS reaches
+        # the JVM only if the launcher builds its command line from it, while
+        # JAVA_TOOL_OPTIONS is read by every JVM.
+        export NXF_OPTS="-Xms512m -Xmx8g -XX:-UseContainerSupport"
+        export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-XX:-UseContainerSupport"
         # Fully offline run: no network fetches at runtime.
         export NXF_OFFLINE=true
         # One line per event instead of an in-place ANSI progress block, which

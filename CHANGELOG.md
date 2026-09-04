@@ -35,6 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selector. The selectors are found rather than listed, so a pipeline upgrade that
   adds one is covered.
 
+### Fixed
+
+- The JVM's cgroup probe throws a `NullPointerException` where a cgroup v2 hierarchy
+  is present but exposes no controller the JDK recognises, which is how a
+  scheduler-created job cgroup can look. Nextflow reaches it while printing system
+  information at startup, so the run dies before submitting any process.
+  `-XX:-UseContainerSupport` is now passed to the head JVM, by way of both `NXF_OPTS`
+  and `JAVA_TOOL_OPTIONS`, since a launcher that does not build its command line from
+  the former still honours the latter. The flag governs only cgroup-derived defaults
+  for heap size and processor count, and the heap is set explicitly, so it is inert
+  where the probe works. The container run options clear `JAVA_TOOL_OPTIONS` so the
+  pipeline's own containerised JVMs keep their cgroup-derived defaults.
+
 ### Changed
 
 - The `penv`/`h_vmem` cluster options and the `qsub` shim are now written only for
