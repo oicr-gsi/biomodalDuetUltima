@@ -451,16 +451,17 @@ NFEOF
         } >> "${INSTANCE_DIR}/nextflow_override.config"
 
         # 3f. Retry a process that failed without saying why. A task killed along with
-        #     its node reports no exit status at all; the shipped policy tests only for
-        #     particular statuses, so a null one falls through to terminate and a single
-        #     lost node ends every branch running beside it. Retry those, and keep
-        #     terminate for a tool that genuinely failed. The backoff matches the
-        #     shipped policy.
+        #     its node never reports an exit status, and Nextflow represents that absence
+        #     as Integer.MAX_VALUE rather than null -- so a policy testing only for
+        #     particular statuses falls through to terminate, and one lost node ends every
+        #     branch running beside it. Both forms of "no status" are retried here; a tool
+        #     that genuinely failed still terminates. The backoff matches the shipped
+        #     policy.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
     errorStrategy = { sleep(Math.pow(2, task.attempt as int) as long)
-                      return (task.exitStatus == null || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
+                      return (task.exitStatus == null || task.exitStatus == Integer.MAX_VALUE || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
     maxRetries    = ~{processMaxRetries}
 }
 NFEOF
