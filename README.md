@@ -66,7 +66,7 @@ Parameter|Value|Default|Description
 `runDuet.bwaMem2Memory`|Int|40|Memory in GB for BWA_MEM2, set independently of maxMemory. bwa-mem2 loads its whole index into memory (~16GB) regardless of input size, so it needs more than the other steps and is killed if given less.
 `runDuet.dedupMemory`|Int|40|Memory in GB for the deduplication steps, set independently of maxMemory. The pipeline requests 128GB but the step is I/O-bound and uses far less, so the default request restricts it to large nodes for no benefit.
 `runDuet.maxTime`|Int|48|Wall-time limit in hours applied to every Nextflow process. Distinct from timeout, which bounds the head task.
-`runDuet.processMaxRetries`|Int|2|How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost node ends every parallel branch. On a cluster whose nodes are created on demand that is routine churn rather than bad luck. Set 0 to restore the shipped behaviour.
+`runDuet.processMaxRetries`|Int|4|How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost node ends every parallel branch. On a cluster whose nodes are created on demand that is routine churn rather than bad luck. Set 0 to restore the shipped behaviour.
 `runDuet.splitReadsPreResolution`|Int|-1|If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off).
 `runDuet.gvcfScatterCount`|Int|20|Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default).
 `runDuet.jobMemory`|Int|16|Memory in GB for the head (Nextflow driver) task
@@ -594,12 +594,18 @@ CLAMPEOF
         #     as Integer.MAX_VALUE rather than null -- so a policy testing only for
         #     particular statuses falls through to terminate, and one lost node ends every
         #     branch running beside it. Both forms of "no status" are retried here; a tool
-        #     that genuinely failed still terminates. The backoff matches the shipped
-        #     policy.
+        #     that genuinely failed still terminates.
+        #     The wait between attempts is in MINUTES, not the milliseconds the shipped
+        #     policy uses. Where nodes are created on demand the usual reason a task is
+        #     lost is that one could not be built, and retrying a few milliseconds later
+        #     asks the same empty pool the same question. Doubling from two minutes, and
+        #     capped so a finalizer thread is never held for long, spans the minutes over
+        #     which capacity actually frees up.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
-    errorStrategy = { sleep(Math.pow(2, task.attempt as int) as long)
+    errorStrategy = { def wait = Math.min(Math.pow(2, task.attempt as int), 5d) as long
+                      sleep(wait * 60000L)
                       return (task.exitStatus == null || task.exitStatus == Integer.MAX_VALUE || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
     maxRetries    = ~{processMaxRetries}
 }

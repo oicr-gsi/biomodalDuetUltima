@@ -290,7 +290,7 @@ task runDuet {
         Int bwaMem2Memory = 40
         Int dedupMemory = 40
         Int maxTime = 48
-        Int processMaxRetries = 2
+        Int processMaxRetries = 4
         Int splitReadsPreResolution = -1
         Int gvcfScatterCount = 20
         Int jobMemory = 16
@@ -777,12 +777,18 @@ CLAMPEOF
         #     as Integer.MAX_VALUE rather than null -- so a policy testing only for
         #     particular statuses falls through to terminate, and one lost node ends every
         #     branch running beside it. Both forms of "no status" are retried here; a tool
-        #     that genuinely failed still terminates. The backoff matches the shipped
-        #     policy.
+        #     that genuinely failed still terminates.
+        #     The wait between attempts is in MINUTES, not the milliseconds the shipped
+        #     policy uses. Where nodes are created on demand the usual reason a task is
+        #     lost is that one could not be built, and retrying a few milliseconds later
+        #     asks the same empty pool the same question. Doubling from two minutes, and
+        #     capped so a finalizer thread is never held for long, spans the minutes over
+        #     which capacity actually frees up.
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
-    errorStrategy = { sleep(Math.pow(2, task.attempt as int) as long)
+    errorStrategy = { def wait = Math.min(Math.pow(2, task.attempt as int), 5d) as long
+                      sleep(wait * 60000L)
                       return (task.exitStatus == null || task.exitStatus == Integer.MAX_VALUE || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
     maxRetries    = ~{processMaxRetries}
 }

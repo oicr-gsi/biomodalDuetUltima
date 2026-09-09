@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The wait between retries is now measured in MINUTES. The shipped policy calls
+  Groovy's `sleep()` with `Math.pow(2, attempt)`, which is milliseconds -- a 2ms pause
+  before the second attempt. That suits a tool that crashed; it is useless where a task
+  was lost because a node could not be created, since retrying 2ms later asks the same
+  empty pool the same question. Observed: three attempts exhausted inside nine minutes
+  against a shortage that cleared in under two hours. Now doubles from two minutes and
+  is capped, so a finalizer thread is never held for long, and `processMaxRetries`
+  defaults to 4 -- roughly twenty minutes of attempts.
 - The per-process cpu clamp now FINDS the requests instead of naming them. A
   hand-kept list covered seven processes; the pipeline and its profiles raise the
   request above eight cores in twenty-five. A process asking for more cores than any
