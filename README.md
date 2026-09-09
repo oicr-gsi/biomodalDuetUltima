@@ -503,28 +503,71 @@ if per_selector:
     print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
 SELEOF
 
-        # 3c. Clamp per-process cpus to what the cluster can schedule.
-        cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+        # 3c. Clamp per-process cpus to what the cluster can schedule. A process asking
+        #     for more cores than any node has is not slow, it is UNSUBMITTABLE: sbatch
+        #     refuses it with "CPU count per node can not be satisfied" and the run dies
+        #     wherever that process happens to sit in the graph. The requests are FOUND
+        #     rather than listed, because a hand-kept list silently misses whichever
+        #     process a profile or a pipeline upgrade raises next -- and a partition with
+        #     small nodes turns every one of those into a failure.
+        CLAMP_MAXCPUS="~{maxCpus}" \
+        CLAMP_PIPELINE_DIR="${INSTANCE_DIR}/pipelines/duet/1.7.0a1" \
+        CLAMP_OVERRIDE_CONFIG="${INSTANCE_DIR}/nextflow_override.config" \
+        python3 << 'CLAMPEOF'
+import os, pathlib, re
 
-process {
-    withName: 'PRELUDE'            { cpus = ~{maxCpus} }
-    withName: 'PRELUDE_ULTIMA'     { cpus = ~{maxCpus} }
-    withName: 'BIOMODAL_COLLAPSE'  { cpus = ~{maxCpus} }
-    withName: 'DEEPVARIANT_CALLER' { cpus = ~{maxCpus} }
-    withName: 'ULTIMA_DEDUP'           { cpus = ~{maxCpus} }
-    withName: 'MERGE_LANES_ULTIMA_DEDUP' { cpus = ~{maxCpus} }
-}
-NFEOF
+maxcpus = int(os.environ["CLAMP_MAXCPUS"])
+pipeline_dir = pathlib.Path(os.environ["CLAMP_PIPELINE_DIR"])
+override = pathlib.Path(os.environ["CLAMP_OVERRIDE_CONFIG"])
 
-        if [ -n "~{additionalProfile}" ]; then
-            cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+wanted = {}
 
-process {
-    withName: 'BWA_MEM2' { cpus = ~{maxCpus} }
-    withName: 'MUTECT2'  { cpus = ~{maxCpus} }
-}
-NFEOF
-        fi
+
+def biggest(expr):
+    """Largest core count a cpus request could resolve to, or None if unreadable.
+
+    A request is often a conditional rather than a number, so every integer in it
+    is a candidate and the largest is what has to fit on a node. Strings and
+    regexes are removed first: a genome or panel name carrying digits would
+    otherwise read as an enormous core count and clamp a small process for nothing.
+    """
+    expr = re.sub(r"\"[^\"]*\"|'[^']*'|/[^/\n]*/", " ", expr)
+    nums = [int(n) for n in re.findall(r"\b\d+\b", expr)]
+    return max(nums) if nums else None
+
+
+def note(name, expr):
+    value = biggest(expr)
+    if name not in wanted or (value is not None and (wanted[name] is None or value > wanted[name])):
+        wanted[name] = value
+
+
+for cfg in sorted(pipeline_dir.glob("*.config")) + sorted(pipeline_dir.glob("conf/*.config")):
+    for m in re.finditer(r"withName:\s*'([^']+)'\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", cfg.read_text(), re.S):
+        c = re.search(r"\bcpus\s*=\s*([^\n;]+)", m.group(2))
+        if c:
+            note(m.group(1), c.group(1))
+
+# Defaults on the process itself, which apply wherever no selector overrides them.
+for nf in sorted(pipeline_dir.glob("modules/*.nf")):
+    text = nf.read_text()
+    pm = re.search(r"^process\s+([A-Za-z_0-9]+)", text, re.M)
+    cm = re.search(r"^\s*cpus\s+([^\n/]+)", text, re.M)
+    if pm and cm:
+        note(pm.group(1), cm.group(1))
+
+over = sorted(n for n, v in wanted.items() if v is not None and v > maxcpus)
+unknown = sorted(n for n, v in wanted.items() if v is None)
+if over:
+    lines = ["", "process {"]
+    lines += ["    withName: '%s' { cpus = %d }" % (n, maxcpus) for n in over]
+    lines += ["}", ""]
+    with override.open("a") as fh:
+        fh.write("\n".join(lines))
+print("Clamped to %d cpus: %s" % (maxcpus, ", ".join(over) or "nothing over the limit"))
+if unknown:
+    print("Cpu request not readable, left alone: %s" % ", ".join(unknown))
+CLAMPEOF
 
         # 3d. Clamp per-process memory to maxMemory.
         #     BWA_MEM2 and the dedup steps are NOT in this list: they need more than

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-09
+
+### Fixed
+
+- The per-process cpu clamp now FINDS the requests instead of naming them. A
+  hand-kept list covered seven processes; the pipeline and its profiles raise the
+  request above eight cores in twenty-five. A process asking for more cores than any
+  node has is not merely slow, it is unsubmittable -- `sbatch` refuses it outright --
+  so on a partition of small nodes each unlisted one is a run that dies wherever that
+  process sits in the graph, however far in. Requests are read from the pipeline
+  config, its profiles and the module defaults; a request written as a conditional is
+  judged by the largest integer in it, with strings and regexes removed first so a
+  reference or panel name carrying digits is not mistaken for a core count.
+
 ## [1.1.0] - 2026-09-03
 
 ### Added
