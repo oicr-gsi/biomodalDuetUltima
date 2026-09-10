@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-09-09
 
+### Added
+
+- `exclusiveProcesses`, naming processes that should get a node to themselves. A step
+  that is single-threaded and does many small reads and writes cannot hide filesystem
+  latency behind parallelism, so it is the one that starves when a node's I/O is
+  contended by other work sharing that node. Reserving the whole node removes the
+  contention without pretending the step needs the cores, at the price of those cores
+  for its duration. Empty by default and ignored under sge. The generic
+  `clusterOptions` is repeated inside each selector, since a selector replaces that
+  setting rather than adding to it.
+
 ### Fixed
 
 - The wait between retries is now measured in MINUTES. The shipped policy calls

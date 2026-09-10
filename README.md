@@ -43,6 +43,7 @@ Parameter|Value|Default|Description
 `processBeforeScript`|String|""|Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge.
 `imagesStagingDir`|String|""|Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image.
 `containerAutoMounts`|Boolean|true|Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true.
+`exclusiveProcesses`|Array[String]|[]|Nextflow processes to give a node of their own, by name. A step that is single-threaded and does many small reads and writes cannot hide filesystem latency behind parallelism, so it is the one that starves when a node's I/O is contended by other work; asking for the whole node removes the contention without pretending the step needs the cores. Costs the unused cores for that step's duration. Empty by default, and ignored under sge.
 
 
 #### Optional task parameters:
@@ -502,6 +503,26 @@ if per_selector:
         fh.write("\n".join(lines))
     print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
 SELEOF
+
+        # 3b-iii. Give named processes a node to themselves, where the scheduler can
+        #     reserve one. The generic clusterOptions is repeated inside each selector
+        #     because a selector REPLACES that setting rather than adding to it, which
+        #     would otherwise drop the accounting group.
+        if [ "${SCHEDULER}" != "sge" ]; then
+            EXCLUSIVE=(~{sep=' ' exclusiveProcesses})
+            if [ "${#EXCLUSIVE[@]}" -gt 0 ]; then
+                {
+                    echo ""
+                    echo "process {"
+                    for pname in "${EXCLUSIVE[@]}"; do
+                        echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                    done
+                    echo "}"
+                    echo ""
+                } >> "${INSTANCE_DIR}/nextflow_override.config"
+                echo "Exclusive node requested for: ${EXCLUSIVE[*]}"
+            fi
+        fi
 
         # 3c. Clamp per-process cpus to what the cluster can schedule. A process asking
         #     for more cores than any node has is not slow, it is UNSUBMITTABLE: sbatch

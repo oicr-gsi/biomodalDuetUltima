@@ -407,6 +407,26 @@ if per_selector:
     print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
 SELEOF
 
+        # 3b-iii. Give named processes a node to themselves, where the scheduler can
+        #     reserve one. The generic clusterOptions is repeated inside each selector
+        #     because a selector REPLACES that setting rather than adding to it, which
+        #     would otherwise drop the accounting group.
+        if [ "${SCHEDULER}" != "sge" ]; then
+            EXCLUSIVE=(~{sep=' ' exclusiveProcesses})
+            if [ "${#EXCLUSIVE[@]}" -gt 0 ]; then
+                {
+                    echo ""
+                    echo "process {"
+                    for pname in "${EXCLUSIVE[@]}"; do
+                        echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                    done
+                    echo "}"
+                    echo ""
+                } >> "${INSTANCE_DIR}/nextflow_override.config"
+                echo "Exclusive node requested for: ${EXCLUSIVE[*]}"
+            fi
+        fi
+
         # 3c. Clamp per-process cpus to what the cluster can schedule. A process asking
         #     for more cores than any node has is not slow, it is UNSUBMITTABLE: sbatch
         #     refuses it with "CPU count per node can not be satisfied" and the run dies
