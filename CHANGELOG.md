@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-09-09
 
+### Fixed
+
+- The pipeline's `bin/` scripts are made executable after the instance directory is
+  copied. They are invoked by name rather than through an interpreter, so without the
+  execute bit they fail with "Permission denied" -- and they fail LATE, because the
+  tool ahead of them exits 0 and only the file they were meant to write is missing.
+  The mode is not always present on the copy: a filesystem can report one fixed mode
+  for every file it serves, and `cp` preserves what it sees.
+
 ### Added
 
 - `exclusiveProcesses`, naming processes that should get a node to themselves. A step
