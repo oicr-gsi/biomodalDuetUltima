@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The pipeline's `bin/` scripts are made executable after the instance directory is
-  copied. They are invoked by name rather than through an interpreter, so without the
-  execute bit they fail with "Permission denied" -- and they fail LATE, because the
-  tool ahead of them exits 0 and only the file they were meant to write is missing.
-  The mode is not always present on the copy: a filesystem can report one fixed mode
-  for every file it serves, and `cp` preserves what it sees.
+- The pipeline's `bin/` directory is linked to the installed tree rather than copied.
+  Its scripts are invoked by name rather than through an interpreter, so they need the
+  execute bit -- and a copy does not always carry it, because a filesystem can report
+  one fixed mode for every file it serves and refuse `chmod` outright, leaving no way
+  to repair the copy afterwards. The installed tree is executable where it sits.
+  Nothing writes to `bin/` and it is not reached by `includeConfig`, which is the only
+  reason the rest of the tree has to be a real copy. The instance directory is added to
+  the container bind list so the link resolves inside a container.
+  This failure is expensive out of proportion to its cause: the tool ahead of the
+  script exits 0 and only the small file the script was to write is missing, so it
+  surfaces at the very end of a run.
 
 ### Added
 

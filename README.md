@@ -258,13 +258,26 @@ This section lists command(s) run by biomodalDuetUltima workflow
         chmod -R u+w ./biomodal_instance/pipelines
 
         # Scripts in the pipeline's bin/ are run by name rather than through an
-        # interpreter, so they need the execute bit. It is not always there on the
-        # copy: a filesystem can report one fixed mode for every file it serves, and
-        # cp preserves what it sees. A script that cannot be executed fails LATE --
-        # the tool ahead of it succeeds, only the file it was meant to write is
-        # missing -- so the cost is the whole run, not the step.
-        find ./biomodal_instance/pipelines -type d -name bin -print0 \
-            | xargs -0 -r -I{} sh -c 'chmod -R u+rx "{}"; echo "Made executable: {}"'
+        # interpreter, so they need the execute bit -- and the copy does not always
+        # carry it, because a filesystem can report one fixed mode for every file it
+        # serves and refuse chmod outright. The installed tree is executable where it
+        # sits, so point at it rather than trying to fix a copy. Nothing writes to
+        # bin/, and it is not reached by includeConfig, which is the only reason the
+        # rest of the tree has to be a real copy.
+        # A script that cannot be executed fails LATE: the tool ahead of it exits 0
+        # and only the small file it was meant to write is missing, so the cost is
+        # the whole run rather than the step.
+        find ./biomodal_instance/pipelines -type d -name bin | while IFS= read -r d; do
+            orig="${BIOMODAL_INSTANCE_DIR}/${d#./biomodal_instance/}"
+            if [ -d "${orig}" ]; then
+                rm -rf "${d}"
+                ln -s "${orig}" "${d}"
+                echo "Linked bin to the installed tree: ${d} -> ${orig}"
+            else
+                echo "ERROR: no installed bin directory at ${orig}" >&2
+                exit 1
+            fi
+        done
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
 
@@ -371,6 +384,7 @@ CLIEOF
         # and the container has to follow it.
         {
             pwd
+            echo "${BIOMODAL_INSTANCE_DIR}"
             echo "${BIOMODAL_REF_DATA_DIR}"
             for f in ~{sep=' ' crams} ~{sep=' ' craiList}; do
                 # Both resolved, so a bind is never a relative path.
