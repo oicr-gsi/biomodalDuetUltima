@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `clusterOptions` is repeated inside each selector, since a selector replaces that
   setting rather than adding to it.
 
+### Changed
+
+- `processMaxRetries` defaults to 8 rather than 4. Attempts back off by minutes, so the
+  default now spans roughly forty of them. A scheduler that is briefly unreachable
+  refuses submissions with no exit status, exactly as a lost node does, and a restart
+  for maintenance outlasts a shorter window -- which costs every hour the run has
+  already spent, since the work is not resumable.
+
 ### Fixed
 
 - The wait between retries is now measured in MINUTES. The shipped policy calls

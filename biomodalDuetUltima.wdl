@@ -294,7 +294,7 @@ task runDuet {
         Int bwaMem2Memory = 40
         Int dedupMemory = 40
         Int maxTime = 48
-        Int processMaxRetries = 4
+        Int processMaxRetries = 8
         Int splitReadsPreResolution = -1
         Int gvcfScatterCount = 20
         Int jobMemory = 16
@@ -335,7 +335,7 @@ task runDuet {
         gvcfScatterCount: "Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default)."
         jobMemory: "Memory in GB for the head (Nextflow driver) task"
         maxTime: "Wall-time limit in hours applied to every Nextflow process. Distinct from timeout, which bounds the head task."
-        processMaxRetries: "How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost node ends every parallel branch. On a cluster whose nodes are created on demand that is routine churn rather than bad luck. Set 0 to restore the shipped behaviour."
+        processMaxRetries: "How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it, or refused because the scheduler was briefly unreachable, reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost task ends every parallel branch. Where nodes are created on demand, and where the scheduler is restarted for maintenance, that is routine rather than bad luck. Attempts back off by minutes, so the default spans roughly forty of them -- long enough to outlast a scheduler restart. Set 0 to restore the shipped behaviour."
         timeout: "Wall-time limit in hours for the head (Nextflow driver) task. Must exceed the runtime of the whole pipeline, not just one process."
     }
 
