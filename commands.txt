@@ -430,10 +430,14 @@ if per_selector:
     print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
 SELEOF
 
-        # 3b-iii. Give named processes a node to themselves, where the scheduler can
-        #     reserve one. The generic clusterOptions is repeated inside each selector
-        #     because a selector REPLACES that setting rather than adding to it, which
-        #     would otherwise drop the accounting group.
+        # 3b-iii. Isolate named processes, either by sending them to a partition whose
+        #     nodes a single task fills, or by reserving a whole node where they already
+        #     are. The first is preferable where nodes are created on demand: an empty
+        #     node is a much harder allocation to satisfy than a partial one, so a
+        #     whole-node request can be refused where an ordinary one succeeds.
+        #     The generic clusterOptions is repeated inside each selector for the
+        #     whole-node form, because a selector REPLACES that setting rather than
+        #     adding to it, which would otherwise drop the accounting group.
         if [ "${SCHEDULER}" != "sge" ]; then
             EXCLUSIVE=(~{sep=' ' exclusiveProcesses})
             if [ "${#EXCLUSIVE[@]}" -gt 0 ]; then
@@ -441,7 +445,11 @@ SELEOF
                     echo ""
                     echo "process {"
                     for pname in "${EXCLUSIVE[@]}"; do
-                        echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                        if [ -n "~{exclusiveQueue}" ]; then
+                            echo "    withName: '${pname}' { queue = '~{exclusiveQueue}' }"
+                        else
+                            echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                        fi
                     done
                     echo "}"
                     echo ""

@@ -44,6 +44,7 @@ Parameter|Value|Default|Description
 `imagesStagingDir`|String|""|Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image.
 `containerAutoMounts`|Boolean|true|Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true.
 `exclusiveProcesses`|Array[String]|[]|Nextflow processes to give a node of their own, by name. A step that is single-threaded and does many small reads and writes cannot hide filesystem latency behind parallelism, so it is the one that starves when a node's I/O is contended by other work; asking for the whole node removes the contention without pretending the step needs the cores. Costs the unused cores for that step's duration. Empty by default, and ignored under sge.
+`exclusiveQueue`|String|""|Partition to send exclusiveProcesses to, instead of reserving a whole node for them where they already are. A task that fills a node outright has that node's resources to itself, which is the point, and asking for a partition whose nodes match the task achieves it without the scheduler having to find an empty node -- a much harder allocation on a partition whose nodes are created on demand. Empty keeps the whole-node request.
 
 
 #### Optional task parameters:
@@ -527,10 +528,14 @@ if per_selector:
     print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
 SELEOF
 
-        # 3b-iii. Give named processes a node to themselves, where the scheduler can
-        #     reserve one. The generic clusterOptions is repeated inside each selector
-        #     because a selector REPLACES that setting rather than adding to it, which
-        #     would otherwise drop the accounting group.
+        # 3b-iii. Isolate named processes, either by sending them to a partition whose
+        #     nodes a single task fills, or by reserving a whole node where they already
+        #     are. The first is preferable where nodes are created on demand: an empty
+        #     node is a much harder allocation to satisfy than a partial one, so a
+        #     whole-node request can be refused where an ordinary one succeeds.
+        #     The generic clusterOptions is repeated inside each selector for the
+        #     whole-node form, because a selector REPLACES that setting rather than
+        #     adding to it, which would otherwise drop the accounting group.
         if [ "${SCHEDULER}" != "sge" ]; then
             EXCLUSIVE=(~{sep=' ' exclusiveProcesses})
             if [ "${#EXCLUSIVE[@]}" -gt 0 ]; then
@@ -538,7 +543,11 @@ SELEOF
                     echo ""
                     echo "process {"
                     for pname in "${EXCLUSIVE[@]}"; do
-                        echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                        if [ -n "~{exclusiveQueue}" ]; then
+                            echo "    withName: '${pname}' { queue = '~{exclusiveQueue}' }"
+                        else
+                            echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                        fi
                     done
                     echo "}"
                     echo ""

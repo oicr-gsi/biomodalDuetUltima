@@ -19,6 +19,7 @@
                 }
             ],
             "biomodalDuetUltima.exclusiveProcesses": null,
+            "biomodalDuetUltima.exclusiveQueue": null,
             "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
@@ -211,6 +212,7 @@
                 }
             ],
             "biomodalDuetUltima.exclusiveProcesses": null,
+            "biomodalDuetUltima.exclusiveQueue": null,
             "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,

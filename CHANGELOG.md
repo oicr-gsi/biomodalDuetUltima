@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `clusterOptions` is repeated inside each selector, since a selector replaces that
   setting rather than adding to it.
 
+### Added
+
+- `exclusiveQueue`, an alternative to reserving a whole node for the processes named in
+  `exclusiveProcesses`: send them to a partition whose nodes a single task fills
+  instead. A task that fills a node outright has that node's resources to itself, which
+  is the point of isolating it; asking for a partition sized to the task achieves that
+  without the scheduler having to find an EMPTY node, which is a far harder allocation
+  where nodes are created on demand and can be refused where an ordinary request
+  succeeds. Empty keeps the whole-node request.
+
 ### Changed
 
 - `processMaxRetries` defaults to 8 rather than 4. Attempts back off by minutes, so the
