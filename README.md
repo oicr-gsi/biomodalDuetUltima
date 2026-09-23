@@ -45,6 +45,7 @@ Parameter|Value|Default|Description
 `containerAutoMounts`|Boolean|true|Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true.
 `exclusiveProcesses`|Array[String]|[]|Nextflow processes to give a node of their own, by name. A step that is single-threaded and does many small reads and writes cannot hide filesystem latency behind parallelism, so it is the one that starves when a node's I/O is contended by other work; asking for the whole node removes the contention without pretending the step needs the cores. Costs the unused cores for that step's duration. Empty by default, and ignored under sge.
 `exclusiveQueue`|String|""|Partition to send exclusiveProcesses to, instead of reserving a whole node for them where they already are. A task that fills a node outright has that node's resources to itself, which is the point, and asking for a partition whose nodes match the task achieves it without the scheduler having to find an empty node -- a much harder allocation on a partition whose nodes are created on demand. Empty keeps the whole-node request.
+`outputDestination`|String|""|Object-store prefix to copy the results to, as a URI. Empty leaves them where the pipeline wrote them. Prefer this to asking the engine for a final output directory on a mounted filesystem: a mounted object store copies every byte through the node, where a copy between two prefixes of the same store moves no data at all. Results land under a subdirectory named for the sample.
 
 
 #### Optional task parameters:
@@ -73,6 +74,9 @@ Parameter|Value|Default|Description
 `runDuet.gvcfScatterCount`|Int|20|Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default).
 `runDuet.jobMemory`|Int|16|Memory in GB for the head (Nextflow driver) task
 `runDuet.timeout`|Int|96|Wall-time limit in hours for the head (Nextflow driver) task. Must exceed the runtime of the whole pipeline, not just one process.
+`copyOut.modules`|String|""|Environment modules, if the copy tool needs one
+`copyOut.jobMemory`|Int|4|Memory in GB. No data passes through this task, so this is nominal.
+`copyOut.timeout`|Int|12|Wall-time limit in hours
 
 
 ### Outputs
@@ -94,6 +98,7 @@ Output | Type | Description | Labels
 `summaryXlsx`|File|Run-level DUET summary metrics in Excel format|vidarr_label: summaryXlsx
 `multiqcReport`|File|MultiQC HTML report aggregating QC metrics across all pipeline steps|vidarr_label: multiqcReport
 `metricsDefinitions`|File|CSV file defining and describing each metric reported in the summary outputs|vidarr_label: metricsDefinitions
+`copiedManifest`|File?|The URI each result was copied to|
 
 
 ## Commands
@@ -944,6 +949,41 @@ SHIMEOF
         ln -s "$(find_one "${REPORTS}" -name "*Summary.xlsx")"             "${OUTPUT_PREFIX}.summary.xlsx"
         ln -s "$(find_one "${REPORTS}" -name "*multiqc_report.html")"      "${OUTPUT_PREFIX}.multiqc_report.html"
         ln -s "$(find_one "${REPORTS}" -name "*Metrics_Definitions.csv")"  "${OUTPUT_PREFIX}.metrics_definitions.csv"
+```
+```
+        set -euo pipefail
+
+        DEST="~{destination}/~{outputFileNamePrefix}"
+
+        command -v gcloud >/dev/null 2>&1 || {
+            echo "ERROR: gcloud is not on PATH, so the copy cannot be made." >&2
+            exit 1
+        }
+
+        # A file on a mounted object store is already IN the store. Naming it by its
+        # store URI leaves the data where it is and costs one API call; copying it by
+        # its mounted path would read and rewrite every byte through this node. Which
+        # store backs a mount is read from the mount table rather than assumed.
+        : > sources.txt
+        for f in ~{sep=' ' files}; do
+            real=$(readlink -f "${f}")
+            mnt=$(df --output=target "${real}" | tail -1)
+            store=$(mount | awk -v m=" ${mnt} " '$0 ~ m && /fuse/ {print $1; exit}')
+            if [ -z "${store}" ]; then
+                echo "ERROR: ${real} is not on a mounted object store, so it has no URI." >&2
+                echo "       Copy it another way, or leave outputDestination empty." >&2
+                exit 1
+            fi
+            echo "gs://${store}${real#${mnt}}" >> sources.txt
+        done
+
+        echo "Copying $(wc -l < sources.txt) file(s) to ${DEST}/"
+        # Read into an array rather than piping: the destination has to come last.
+        mapfile -t SOURCES < sources.txt
+        gcloud storage cp "${SOURCES[@]}" "${DEST}/"
+
+        sed "s|.*/|${DEST}/|" sources.txt > "~{outputFileNamePrefix}.copied.txt"
+        cat "~{outputFileNamePrefix}.copied.txt"
 ```
 
 ## Support

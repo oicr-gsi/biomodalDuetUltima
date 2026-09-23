@@ -847,3 +847,38 @@ SHIMEOF
         ln -s "$(find_one "${REPORTS}" -name "*multiqc_report.html")"      "${OUTPUT_PREFIX}.multiqc_report.html"
         ln -s "$(find_one "${REPORTS}" -name "*Metrics_Definitions.csv")"  "${OUTPUT_PREFIX}.metrics_definitions.csv"
 ```
+```
+        set -euo pipefail
+
+        DEST="~{destination}/~{outputFileNamePrefix}"
+
+        command -v gcloud >/dev/null 2>&1 || {
+            echo "ERROR: gcloud is not on PATH, so the copy cannot be made." >&2
+            exit 1
+        }
+
+        # A file on a mounted object store is already IN the store. Naming it by its
+        # store URI leaves the data where it is and costs one API call; copying it by
+        # its mounted path would read and rewrite every byte through this node. Which
+        # store backs a mount is read from the mount table rather than assumed.
+        : > sources.txt
+        for f in ~{sep=' ' files}; do
+            real=$(readlink -f "${f}")
+            mnt=$(df --output=target "${real}" | tail -1)
+            store=$(mount | awk -v m=" ${mnt} " '$0 ~ m && /fuse/ {print $1; exit}')
+            if [ -z "${store}" ]; then
+                echo "ERROR: ${real} is not on a mounted object store, so it has no URI." >&2
+                echo "       Copy it another way, or leave outputDestination empty." >&2
+                exit 1
+            fi
+            echo "gs://${store}${real#${mnt}}" >> sources.txt
+        done
+
+        echo "Copying $(wc -l < sources.txt) file(s) to ${DEST}/"
+        # Read into an array rather than piping: the destination has to come last.
+        mapfile -t SOURCES < sources.txt
+        gcloud storage cp "${SOURCES[@]}" "${DEST}/"
+
+        sed "s|.*/|${DEST}/|" sources.txt > "~{outputFileNamePrefix}.copied.txt"
+        cat "~{outputFileNamePrefix}.copied.txt"
+```

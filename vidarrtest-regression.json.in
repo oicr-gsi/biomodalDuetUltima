@@ -3,6 +3,9 @@
         "arguments": {
             "biomodalDuetUltima.additionalProfile": "",
             "biomodalDuetUltima.containerAutoMounts": null,
+            "biomodalDuetUltima.copyOut.jobMemory": null,
+            "biomodalDuetUltima.copyOut.modules": null,
+            "biomodalDuetUltima.copyOut.timeout": null,
             "biomodalDuetUltima.craiIndexes": null,
             "biomodalDuetUltima.crams": [
                 {
@@ -23,6 +26,7 @@
             "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputDestination": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_01",
             "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
@@ -196,6 +200,9 @@
         "arguments": {
             "biomodalDuetUltima.additionalProfile": "",
             "biomodalDuetUltima.containerAutoMounts": null,
+            "biomodalDuetUltima.copyOut.jobMemory": null,
+            "biomodalDuetUltima.copyOut.modules": null,
+            "biomodalDuetUltima.copyOut.timeout": null,
             "biomodalDuetUltima.craiIndexes": null,
             "biomodalDuetUltima.crams": [
                 {
@@ -216,6 +223,7 @@
             "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputDestination": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_02",
             "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,

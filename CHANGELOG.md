@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `outputDestination` and a `copyOut` task. Empty leaves results where the pipeline
+  wrote them. Set to an object-store prefix and the results are copied there, under a
+  subdirectory named for the sample, and a manifest of their new locations is produced.
+  This exists because asking the engine for a final output directory on a mounted
+  object store is a trap: it reads and rewrites every byte through the running node,
+  which is slow and can exhaust that node's local storage, while a copy between two
+  prefixes of the same store moves no data at all. The task names each file by its
+  store URI, working out which store backs a mount from the mount table rather than
+  assuming one, and fails clearly if a file is not on such a mount.
+
+### Added
+
 - `exclusiveQueue`, an alternative to reserving a whole node for the processes named in
   `exclusiveProcesses`: send them to a partition whose nodes a single task fills
   instead. A task that fills a node outright has that node's resources to itself, which

@@ -19,6 +19,7 @@ workflow biomodalDuetUltima {
         Boolean containerAutoMounts = true
         Array[String] exclusiveProcesses = []
         String exclusiveQueue = ""
+        String outputDestination = ""
     }
 
     parameter_meta {
@@ -37,6 +38,7 @@ workflow biomodalDuetUltima {
         processBeforeScript: "Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge."
         imagesStagingDir: "Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image."
         exclusiveProcesses: "Nextflow processes to give a node of their own, by name. A step that is single-threaded and does many small reads and writes cannot hide filesystem latency behind parallelism, so it is the one that starves when a node's I/O is contended by other work; asking for the whole node removes the contention without pretending the step needs the cores. Costs the unused cores for that step's duration. Empty by default, and ignored under sge."
+        outputDestination: "Object-store prefix to copy the results to, as a URI. Empty leaves them where the pipeline wrote them. Prefer this to asking the engine for a final output directory on a mounted filesystem: a mounted object store copies every byte through the node, where a copy between two prefixes of the same store moves no data at all. Results land under a subdirectory named for the sample."
         exclusiveQueue: "Partition to send exclusiveProcesses to, instead of reserving a whole node for them where they already are. A task that fills a node outright has that node's resources to itself, which is the point, and asking for a partition whose nodes match the task achieves it without the scheduler having to find an empty node -- a much harder allocation on a partition whose nodes are created on demand. Empty keeps the whole-node request."
         containerAutoMounts: "Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true."
     }
@@ -73,6 +75,27 @@ workflow biomodalDuetUltima {
             exclusiveProcesses = exclusiveProcesses,
             exclusiveQueue = exclusiveQueue,
             modules = modules
+    }
+
+    # Results stay where the pipeline wrote them, which on a shared filesystem is
+    # usually right. Where that filesystem is a mounted object store, a copy to
+    # another prefix of the same store moves no data, while a copy to another mount
+    # reads and rewrites every byte through this node.
+    if (outputDestination != "") {
+        call copyOut {
+            input:
+                # select_all drops the outputs a run did not produce -- germline
+                # calling is optional, so its VCF may not exist.
+                files = select_all([runDuet.outputBam, runDuet.outputBai,
+                         runDuet.hmc_cxreport, runDuet.hmc_cxreportIndex,
+                         runDuet.mc_cxreport, runDuet.mc_cxreportIndex,
+                         runDuet.modc_cxreport, runDuet.modc_cxreportIndex,
+                         runDuet.vcf, runDuet.vcfIndex,
+                         runDuet.summaryCsv, runDuet.summaryHtml, runDuet.summaryXlsx,
+                         runDuet.multiqcReport, runDuet.metricsDefinitions]),
+                destination = outputDestination,
+                outputFileNamePrefix = outputFileNamePrefix
+        }
     }
 
     meta {
@@ -165,6 +188,7 @@ workflow biomodalDuetUltima {
         File  summaryXlsx = runDuet.summaryXlsx
         File  multiqcReport = runDuet.multiqcReport
         File  metricsDefinitions = runDuet.metricsDefinitions
+        File? copiedManifest = copyOut.manifest
     }
 }
 
@@ -1159,5 +1183,76 @@ SHIMEOF
         File  summaryXlsx = "~{outputFileNamePrefix}.summary.xlsx"
         File  multiqcReport = "~{outputFileNamePrefix}.multiqc_report.html"
         File  metricsDefinitions = "~{outputFileNamePrefix}.metrics_definitions.csv"
+    }
+}
+
+task copyOut {
+    input {
+        Array[File] files
+        String destination
+        String outputFileNamePrefix
+        String modules = ""
+        Int jobMemory = 4
+        Int timeout = 12
+    }
+    parameter_meta {
+        files: "Files to copy. Taken as File so the engine resolves them, then read back through their real paths."
+        destination: "Object-store prefix to copy under, as a URI. A subdirectory named for the sample is added."
+        outputFileNamePrefix: "Names the subdirectory the results land in"
+        modules: "Environment modules, if the copy tool needs one"
+        jobMemory: "Memory in GB. No data passes through this task, so this is nominal."
+        timeout: "Wall-time limit in hours"
+    }
+
+    command <<<
+        set -euo pipefail
+
+        DEST="~{destination}/~{outputFileNamePrefix}"
+
+        command -v gcloud >/dev/null 2>&1 || {
+            echo "ERROR: gcloud is not on PATH, so the copy cannot be made." >&2
+            exit 1
+        }
+
+        # A file on a mounted object store is already IN the store. Naming it by its
+        # store URI leaves the data where it is and costs one API call; copying it by
+        # its mounted path would read and rewrite every byte through this node. Which
+        # store backs a mount is read from the mount table rather than assumed.
+        : > sources.txt
+        for f in ~{sep=' ' files}; do
+            real=$(readlink -f "${f}")
+            mnt=$(df --output=target "${real}" | tail -1)
+            store=$(mount | awk -v m=" ${mnt} " '$0 ~ m && /fuse/ {print $1; exit}')
+            if [ -z "${store}" ]; then
+                echo "ERROR: ${real} is not on a mounted object store, so it has no URI." >&2
+                echo "       Copy it another way, or leave outputDestination empty." >&2
+                exit 1
+            fi
+            echo "gs://${store}${real#${mnt}}" >> sources.txt
+        done
+
+        echo "Copying $(wc -l < sources.txt) file(s) to ${DEST}/"
+        # Read into an array rather than piping: the destination has to come last.
+        mapfile -t SOURCES < sources.txt
+        gcloud storage cp "${SOURCES[@]}" "${DEST}/"
+
+        sed "s|.*/|${DEST}/|" sources.txt > "~{outputFileNamePrefix}.copied.txt"
+        cat "~{outputFileNamePrefix}.copied.txt"
+    >>>
+
+    runtime {
+        memory:  "~{jobMemory} GB"
+        timeout: "~{timeout}"
+        modules: "~{modules}"
+    }
+
+    output {
+        File manifest = "~{outputFileNamePrefix}.copied.txt"
+    }
+
+    meta {
+        output_meta: {
+            manifest: "The URI each result was copied to"
+        }
     }
 }
