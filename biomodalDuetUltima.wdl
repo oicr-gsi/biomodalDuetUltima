@@ -92,7 +92,8 @@ workflow biomodalDuetUltima {
                          runDuet.modc_cxreport, runDuet.modc_cxreportIndex,
                          runDuet.vcf, runDuet.vcfIndex,
                          runDuet.summaryCsv, runDuet.summaryHtml, runDuet.summaryXlsx,
-                         runDuet.multiqcReport, runDuet.metricsDefinitions]),
+                         runDuet.multiqcReport, runDuet.metricsDefinitions,
+                         runDuet.genomeZarr]),
                 destination = outputDestination,
                 outputFileNamePrefix = outputFileNamePrefix
         }
@@ -168,6 +169,10 @@ workflow biomodalDuetUltima {
             metricsDefinitions: {
                 description: "CSV file defining and describing each metric reported in the summary outputs",
                 vidarr_label: "metricsDefinitions"
+            },
+            genomeZarr: {
+                description: "Joined Zarr store of genome methylation quantification, the archive downstream analysis reads",
+                vidarr_label: "genomeZarr"
             }
         }
     }
@@ -188,6 +193,7 @@ workflow biomodalDuetUltima {
         File  summaryXlsx = runDuet.summaryXlsx
         File  multiqcReport = runDuet.multiqcReport
         File  metricsDefinitions = runDuet.metricsDefinitions
+        File  genomeZarr = runDuet.genomeZarr
         File? copiedManifest = copyOut.manifest
     }
 }
@@ -1159,6 +1165,12 @@ SHIMEOF
         ln -s "$(find_one "${REPORTS}" -name "*Summary.xlsx")"             "${OUTPUT_PREFIX}.summary.xlsx"
         ln -s "$(find_one "${REPORTS}" -name "*multiqc_report.html")"      "${OUTPUT_PREFIX}.multiqc_report.html"
         ln -s "$(find_one "${REPORTS}" -name "*Metrics_Definitions.csv")"  "${OUTPUT_PREFIX}.metrics_definitions.csv"
+
+        # 8e. Joined Zarr store. This is the form downstream analysis reads -- an
+        #     archive aggregating the per-sample stores -- and it is published only
+        #     when the pipeline is asked to join them, which it is by default.
+        ZARR_STORE="${RESULTS_SUBDIR}/sample_outputs/zarr_store"
+        ln -s "$(find_one "${ZARR_STORE}" -name "*genome*.zarrz")" "${OUTPUT_PREFIX}.genome_zarr.zarrz"
     >>>
 
     runtime {
@@ -1183,6 +1195,7 @@ SHIMEOF
         File  summaryXlsx = "~{outputFileNamePrefix}.summary.xlsx"
         File  multiqcReport = "~{outputFileNamePrefix}.multiqc_report.html"
         File  metricsDefinitions = "~{outputFileNamePrefix}.metrics_definitions.csv"
+        File  genomeZarr = "~{outputFileNamePrefix}.genome_zarr.zarrz"
     }
 }
 

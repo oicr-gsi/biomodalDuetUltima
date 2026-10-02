@@ -98,6 +98,7 @@ Output | Type | Description | Labels
 `summaryXlsx`|File|Run-level DUET summary metrics in Excel format|vidarr_label: summaryXlsx
 `multiqcReport`|File|MultiQC HTML report aggregating QC metrics across all pipeline steps|vidarr_label: multiqcReport
 `metricsDefinitions`|File|CSV file defining and describing each metric reported in the summary outputs|vidarr_label: metricsDefinitions
+`genomeZarr`|File|Joined Zarr store of genome methylation quantification, the archive downstream analysis reads|vidarr_label: genomeZarr
 `copiedManifest`|File?|The URI each result was copied to|
 
 
@@ -949,6 +950,12 @@ SHIMEOF
         ln -s "$(find_one "${REPORTS}" -name "*Summary.xlsx")"             "${OUTPUT_PREFIX}.summary.xlsx"
         ln -s "$(find_one "${REPORTS}" -name "*multiqc_report.html")"      "${OUTPUT_PREFIX}.multiqc_report.html"
         ln -s "$(find_one "${REPORTS}" -name "*Metrics_Definitions.csv")"  "${OUTPUT_PREFIX}.metrics_definitions.csv"
+
+        # 8e. Joined Zarr store. This is the form downstream analysis reads -- an
+        #     archive aggregating the per-sample stores -- and it is published only
+        #     when the pipeline is asked to join them, which it is by default.
+        ZARR_STORE="${RESULTS_SUBDIR}/sample_outputs/zarr_store"
+        ln -s "$(find_one "${ZARR_STORE}" -name "*genome*.zarrz")" "${OUTPUT_PREFIX}.genome_zarr.zarrz"
 ```
 ```
         set -euo pipefail

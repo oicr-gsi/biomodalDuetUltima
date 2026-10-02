@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `genomeZarr`: the joined Zarr store is now a declared output. The pipeline publishes
+  it by default and it is what downstream analysis reads, but it was not among the
+  outputs, so it was produced on every run and then discarded with the working
+  directory. It is a single archive, so it is delivered like any other file.
+
+### Added
+
 - `outputDestination` and a `copyOut` task. Empty leaves results where the pipeline
   wrote them. Set to an object-store prefix and the results are copied there, under a
   subdirectory named for the sample, and a manifest of their new locations is produced.
