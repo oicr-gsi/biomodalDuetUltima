@@ -355,7 +355,12 @@ NFEOF
             # an unset value would bind an empty path and fail every process. The
             # caller's script is appended rather than substituted, so a site that has to
             # put its container runtime on PATH does not lose the guard.
-            SLURM_BEFORE='export TMPDIR="${TMPDIR:-/tmp}"'
+            # The fallback prefers the scheduler's node-local scratch over the shared
+            # temporary directory, which some clusters mount without execute permission:
+            # the image unpacks into a sandbox there and the first command inside the
+            # container then fails.
+            SLURM_BEFORE='export TMPDIR="${TMPDIR:-${TMP:-/tmp}}"
+export SINGULARITY_TMPDIR="${TMPDIR}" APPTAINER_TMPDIR="${TMPDIR}"'
             if [ -n "~{processBeforeScript}" ]; then
                 SLURM_BEFORE="${SLURM_BEFORE}
 ~{processBeforeScript}"
