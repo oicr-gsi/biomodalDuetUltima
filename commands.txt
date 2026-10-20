@@ -355,7 +355,21 @@ NFEOF
             # an unset value would bind an empty path and fail every process. The
             # caller's script is appended rather than substituted, so a site that has to
             # put its container runtime on PATH does not lose the guard.
-            SLURM_BEFORE='export TMPDIR="${TMPDIR:-/tmp}"'
+            # An image is unpacked into a sandbox and then run from there, so the directory
+            # has to allow execution as well as be writable. Each candidate is tested by
+            # running something from it rather than assumed, because what the schedulers
+            # offer differs. Bare /tmp is refused even where it works, since that is the
+            # path being mounted noexec as clusters are hardened. No single quotes below:
+            # the snippet is carried through a quoted shell string and a Groovy one.
+            SLURM_BEFORE='for d in "${TMP:-}" "${TMPDIR:-}" "${PWD}"; do
+  [ -n "$d" ] && [ "$d" != "/tmp" ] && [ -d "$d" ] && [ -w "$d" ] || continue
+  p=$(mktemp "$d/exectest.XXXXXX" 2>/dev/null) || continue
+  printf "#!/bin/sh\nexit 0\n" > "$p"
+  if chmod +x "$p" 2>/dev/null && "$p" 2>/dev/null; then rm -f "$p"; export TMPDIR="$d"; break; fi
+  rm -f "$p"
+done
+[ -n "${TMPDIR:-}" ] && [ "${TMPDIR}" != "/tmp" ] || { echo "ERROR: no writable directory that allows execution; set TMP to one" >&2; exit 1; }
+export SINGULARITY_TMPDIR="${TMPDIR}" APPTAINER_TMPDIR="${TMPDIR}"'
             if [ -n "~{processBeforeScript}" ]; then
                 SLURM_BEFORE="${SLURM_BEFORE}
 ~{processBeforeScript}"
