@@ -5,6 +5,172 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-16
+### Fixed
+- Unpack container images somewhere that allows execution. The shared temporary directory
+  is mounted noexec on some clusters, where unpacking succeeds and the first command inside
+  the container fails. Each candidate is now tested by running something from it, bare
+  `/tmp` is refused, and a run where none is usable stops with that reason.
+
+## [1.2.0] - 2026-09-09
+
+### Fixed
+
+- The pipeline's `bin/` directory is linked to the installed tree rather than copied.
+  Its scripts are invoked by name rather than through an interpreter, so they need the
+  execute bit -- and a copy does not always carry it, because a filesystem can report
+  one fixed mode for every file it serves and refuse `chmod` outright, leaving no way
+  to repair the copy afterwards. The installed tree is executable where it sits.
+  Nothing writes to `bin/` and it is not reached by `includeConfig`, which is the only
+  reason the rest of the tree has to be a real copy. The instance directory is added to
+  the container bind list so the link resolves inside a container.
+  This failure is expensive out of proportion to its cause: the tool ahead of the
+  script exits 0 and only the small file the script was to write is missing, so it
+  surfaces at the very end of a run.
+
+### Added
+
+- `exclusiveProcesses`, naming processes that should get a node to themselves. A step
+  that is single-threaded and does many small reads and writes cannot hide filesystem
+  latency behind parallelism, so it is the one that starves when a node's I/O is
+  contended by other work sharing that node. Reserving the whole node removes the
+  contention without pretending the step needs the cores, at the price of those cores
+  for its duration. Empty by default and ignored under sge. The generic
+  `clusterOptions` is repeated inside each selector, since a selector replaces that
+  setting rather than adding to it.
+
+### Added
+
+- `genomeZarr`: the joined Zarr store is now a declared output. The pipeline publishes
+  it by default and it is what downstream analysis reads, but it was not among the
+  outputs, so it was produced on every run and then discarded with the working
+  directory. It is a single archive, so it is delivered like any other file.
+
+### Added
+
+- `outputDestination` and a `copyOut` task. Empty leaves results where the pipeline
+  wrote them. Set to an object-store prefix and the results are copied there, under a
+  subdirectory named for the sample, and a manifest of their new locations is produced.
+  This exists because asking the engine for a final output directory on a mounted
+  object store is a trap: it reads and rewrites every byte through the running node,
+  which is slow and can exhaust that node's local storage, while a copy between two
+  prefixes of the same store moves no data at all. The task names each file by its
+  store URI, working out which store backs a mount from the mount table rather than
+  assuming one, and fails clearly if a file is not on such a mount.
+
+### Added
+
+- `exclusiveQueue`, an alternative to reserving a whole node for the processes named in
+  `exclusiveProcesses`: send them to a partition whose nodes a single task fills
+  instead. A task that fills a node outright has that node's resources to itself, which
+  is the point of isolating it; asking for a partition sized to the task achieves that
+  without the scheduler having to find an EMPTY node, which is a far harder allocation
+  where nodes are created on demand and can be refused where an ordinary request
+  succeeds. Empty keeps the whole-node request.
+
+### Changed
+
+- `processMaxRetries` defaults to 8 rather than 4. Attempts back off by minutes, so the
+  default now spans roughly forty of them. A scheduler that is briefly unreachable
+  refuses submissions with no exit status, exactly as a lost node does, and a restart
+  for maintenance outlasts a shorter window -- which costs every hour the run has
+  already spent, since the work is not resumable.
+
+### Fixed
+
+- The wait between retries is now measured in MINUTES. The shipped policy calls
+  Groovy's `sleep()` with `Math.pow(2, attempt)`, which is milliseconds -- a 2ms pause
+  before the second attempt. That suits a tool that crashed; it is useless where a task
+  was lost because a node could not be created, since retrying 2ms later asks the same
+  empty pool the same question. Observed: three attempts exhausted inside nine minutes
+  against a shortage that cleared in under two hours. Now doubles from two minutes and
+  is capped, so a finalizer thread is never held for long, and `processMaxRetries`
+  defaults to 4 -- roughly twenty minutes of attempts.
+- The per-process cpu clamp now FINDS the requests instead of naming them. A
+  hand-kept list covered seven processes; the pipeline and its profiles raise the
+  request above eight cores in twenty-five. A process asking for more cores than any
+  node has is not merely slow, it is unsubmittable -- `sbatch` refuses it outright --
+  so on a partition of small nodes each unlisted one is a run that dies wherever that
+  process sits in the graph, however far in. Requests are read from the pipeline
+  config, its profiles and the module defaults; a request written as a conditional is
+  judged by the largest integer in it, with strings and regexes removed first so a
+  reference or panel name carrying digits is not mistaken for a core count.
+
+## [1.1.0] - 2026-09-03
+
+### Added
+
+- `scheduler`, `slurmPartition`, `slurmAccount`, `processBeforeScript` and
+  `imagesStagingDir`, so the workflow runs on slurm as well as sge. `scheduler`
+  accepts `sge` (the default, unchanged behaviour), `slurm`, `slurm-gcp`, or `auto`
+  to resolve from the submit command the cluster provides. It is decided before any
+  work is done, and the submit command is checked for, so a setting the cluster
+  cannot satisfy fails at once rather than at the first process submission.
+- `slurm-gcp` differs from `slurm` in its defaults only: it takes `compute` as the
+  partition and sends no accounting group, which is how a cloud slurm deployment is
+  normally configured. `slurm` requires `slurmPartition`, because the pipeline's own
+  slurm profile names a queue that exists only at the vendor's site. `auto`
+  distinguishes the two from the machine's firmware identity, which is a local file
+  read; resolving the cloud metadata hostname is deliberately not used, as a
+  resolver that answers wildcards reports a cloud instance where there is none.
+- The task writes the executor settings itself and appends them last, so no config
+  file has to be placed on the cluster to change scheduler. For slurm it also
+  answers `data_path`, `work_path` and `reference_path`, which the pipeline's slurm
+  profile points at the vendor's own installation, and sets a `beforeScript` that
+  gives `TMPDIR` a value: Grid Engine always sets it and slurm does not, and the
+  container run options bind it. `processBeforeScript` is appended to that rather
+  than replacing it, so a site that has to put its container runtime on PATH keeps
+  the guard.
+- `clusterOptions` and `time` are replaced on every `withName` selector that sets
+  them, not just on the generic scope, since a generic assignment does not reach a
+  selector. The selectors are found rather than listed, so a pipeline upgrade that
+  adds one is covered.
+
+### Fixed
+
+- `containerAutoMounts`, defaulting to true. Nextflow derives its container bind
+  points from the paths a task touches and collapses them into their common parents.
+  Where the execution tree and the installed software sit under a single top-level
+  directory, that directory is what gets bound -- and if the image has its own copy,
+  the host's hides it and every tool inside disappears. Set it false there. The task
+  now lists its bind points individually in `runOptions` regardless, so turning the
+  derivation off loses nothing: the working directory, the reference bundle, and both
+  the staged and resolved locations of every input are bound by name.
+
+
+- The JVM's cgroup probe throws a `NullPointerException` where a cgroup v2 hierarchy
+  is present but exposes no controller the JDK recognises, which is how a
+  scheduler-created job cgroup can look. Nextflow reaches it while printing system
+  information at startup, so the run dies before submitting any process.
+  `-XX:-UseContainerSupport` is now passed to the head JVM, by way of both `NXF_OPTS`
+  and `JAVA_TOOL_OPTIONS`, since a launcher that does not build its command line from
+  the former still honours the latter. The flag governs only cgroup-derived defaults
+  for heap size and processor count, and the heap is set explicitly, so it is inert
+  where the probe works. The container run options clear `JAVA_TOOL_OPTIONS` so the
+  pipeline's own containerised JVMs keep their cgroup-derived defaults.
+
+### Changed
+
+- `processMaxRetries` (default 2) and a retry policy that covers a process failing
+  without an exit status. A task killed along with the node under it reports none, and
+  the shipped policy tests only for particular statuses, so that case fell through to
+  `terminate` -- one lost node ended every branch running beside it. Where nodes are
+  created on demand that is routine churn, not bad luck. Genuine tool failures still
+  terminate; set it to 0 for the shipped behaviour.
+- `callGermlineVariants` now defaults to FALSE, where the pipeline's own default is to
+  call. DeepVariant here runs as one unscattered process taking `--num_shards` from its
+  cpus, and no GPU is requested anywhere in the pipeline, so on a deeply sequenced sample
+  it can dominate the run and push the whole workflow past its wall-time limit -- which
+  loses the methylation outputs as well, since those are collected only after the pipeline
+  returns. A methylation run should not pay for calls it was not asked for. Set it true
+  where germline calls are wanted, and give the step enough cpus when doing so.
+- The `penv`/`h_vmem` cluster options and the `qsub` shim are now written only for
+  sge. Both exist to work around `h_vmem` being a per-slot limit and Nextflow's SGE
+  executor emitting RSS directives alongside it; slurm's `--mem` is per job and has
+  no equivalent, so neither is generated there.
+- The container image staging directory is an input rather than a fixed path, so a
+  site other than the one the module was built for can supply its own.
+
 ## [1.0.0] - 2026-08-12
 
 ### Added

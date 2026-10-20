@@ -37,6 +37,15 @@ Parameter|Value|Default|Description
 `modules`|String|"biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"|Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)
 `splitCramReads`|Int|-1|If >0, split the single input CRAM into parts of this many reads and present them to the pipeline as separate lanes, so PRELUDE and BWA_MEM2 run per part in parallel. Faster than the pipeline's own split_reads_pre_resolution, which converts CRAM to FASTQ first. Requires exactly one input CRAM. Default -1 (off).
 `craiIndexes`|Array[File]?|None|Optional pre-built .crai, one per entry of crams, matched by basename. Used only when splitCram does not run; supply it when re-running against parts an earlier splitCram produced, to skip re-indexing.
+`scheduler`|String|"sge"|Which scheduler Nextflow submits its own jobs to: sge, slurm, slurm-gcp, or auto to decide from the submit command the cluster provides and whether the node is a cloud instance. slurm-gcp differs from slurm only in its defaults. Default sge.
+`slurmPartition`|String|""|Partition Nextflow submits its own jobs to. Required when scheduler is slurm, because the pipeline's slurm profile names a queue that exists only at the vendor's own site. Defaults to compute under slurm-gcp.
+`slurmAccount`|String|""|Accounting group for the jobs Nextflow submits, where the site enforces one. Ignored under sge.
+`processBeforeScript`|String|""|Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge.
+`imagesStagingDir`|String|""|Directory holding container images the module does not ship, searched only after the module's own image set. Empty uses the module's, which is right once it ships every image.
+`containerAutoMounts`|Boolean|true|Whether Nextflow may derive its own container bind points. It collapses the paths a task needs into their common parents, so where the execution tree and the installed software sit under one top-level directory, that directory is bound -- and if the image has its own copy, the host's hides it and the tools inside are gone. Set false there; the task binds what it needs explicitly either way. Default true.
+`exclusiveProcesses`|Array[String]|[]|Nextflow processes to give a node of their own, by name. A step that is single-threaded and does many small reads and writes cannot hide filesystem latency behind parallelism, so it is the one that starves when a node's I/O is contended by other work; asking for the whole node removes the contention without pretending the step needs the cores. Costs the unused cores for that step's duration. Empty by default, and ignored under sge.
+`exclusiveQueue`|String|""|Partition to send exclusiveProcesses to, instead of reserving a whole node for them where they already are. A task that fills a node outright has that node's resources to itself, which is the point, and asking for a partition whose nodes match the task achieves it without the scheduler having to find an empty node -- a much harder allocation on a partition whose nodes are created on demand. Empty keeps the whole-node request.
+`outputDestination`|String|""|Object-store prefix to copy the results to, as a URI. Empty leaves them where the pipeline wrote them. Prefer this to asking the engine for a final output directory on a mounted filesystem: a mounted object store copies every byte through the node, where a copy between two prefixes of the same store moves no data at all. Results land under a subdirectory named for the sample.
 
 
 #### Optional task parameters:
@@ -53,17 +62,21 @@ Parameter|Value|Default|Description
 `runDuet.meanQualityR1`|Int|15|prelude.mean_quality_R1: minimum mean quality below which an R1 read is discarded
 `runDuet.meanQualityR2`|Int|15|prelude.mean_quality_R2: minimum mean quality below which an R2 read is discarded
 `runDuet.maskEndCs`|Int|5|prelude.mask_end_cs: mask Cs in the last n bases at the tail of reads to improve methylation-calling sensitivity
-`runDuet.callGermlineVariants`|Boolean|true|Whether to run germline variant calling at all. Set false for a methylation-only run (e.g. when the DeepVariant model is unavailable)
+`runDuet.callGermlineVariants`|Boolean|false|Whether to run germline variant calling at all. Defaults to FALSE, unlike the pipeline itself, so a methylation run does not pay for calls it was not asked for. The DeepVariant path runs as ONE unscattered process taking --num_shards from its cpus, and no GPU is requested anywhere in the pipeline, so on a deeply sequenced sample it can dominate the run and push the whole workflow past its wall-time limit -- which loses the methylation outputs too, since those are only collected once the pipeline returns.
 `runDuet.variantCaller`|String|"deepvariant"|Germline variant caller: deepvariant (Ultima-trained model), gatk, or both
 `runDuet.maxCpus`|Int|16|Cap on per-process cpus for the heavy pipeline steps, which request 32-96 by default. Lower it so those steps fit the nodes available on your cluster.
 `runDuet.maxMemory`|Int|64|Cap (GB) on per-process memory for the heavy pipeline steps, which request 32-64GB by default. Only reduces, so the default 64 is a no-op; lower it to fit smaller nodes. Does not apply to BWA_MEM2 or the dedup steps, which have their own settings.
 `runDuet.bwaMem2Memory`|Int|40|Memory in GB for BWA_MEM2, set independently of maxMemory. bwa-mem2 loads its whole index into memory (~16GB) regardless of input size, so it needs more than the other steps and is killed if given less.
 `runDuet.dedupMemory`|Int|40|Memory in GB for the deduplication steps, set independently of maxMemory. The pipeline requests 128GB but the step is I/O-bound and uses far less, so the default request restricts it to large nodes for no benefit.
 `runDuet.maxTime`|Int|48|Wall-time limit in hours applied to every Nextflow process. Distinct from timeout, which bounds the head task.
+`runDuet.processMaxRetries`|Int|8|How many times a Nextflow process is resubmitted after failing. Matters most for a failure the task did not cause: a task killed along with the node under it, or refused because the scheduler was briefly unreachable, reports NO exit status, and the shipped policy tests only for particular statuses, so that case falls through to terminate and one lost task ends every parallel branch. Where nodes are created on demand, and where the scheduler is restarted for maintenance, that is routine rather than bad luck. Attempts back off by minutes, so the default spans roughly forty of them -- long enough to outlast a scheduler restart. Set 0 to restore the shipped behaviour.
 `runDuet.splitReadsPreResolution`|Int|-1|If >0, the pipeline splits the input into chunks of this many reads (seqkit) and runs PRELUDE per chunk in PARALLEL (converting CRAM->FASTQ first), merging before dedup. Essential for very large Ultima samples (~2.3B reads) where a single serial PRELUDE would exceed the wall-time limit. E.g. 285000000 -> ~8 chunks for a 2.3B-read sample. ONLY works with a single input CRAM (one lane) -- do not combine with multiple crams. Default -1 (off).
 `runDuet.gvcfScatterCount`|Int|20|Number of genomic intervals to scatter GATK variant calling across (SPLIT_INTERVALS -> per-interval HAPLOTYPE_CALLER/GENOMICS_DB_IMPORT, run in parallel). Increase for more variant-calling parallelism on large genomes/samples. Default 20 (pipeline default).
 `runDuet.jobMemory`|Int|16|Memory in GB for the head (Nextflow driver) task
 `runDuet.timeout`|Int|96|Wall-time limit in hours for the head (Nextflow driver) task. Must exceed the runtime of the whole pipeline, not just one process.
+`copyOut.modules`|String|""|Environment modules, if the copy tool needs one
+`copyOut.jobMemory`|Int|4|Memory in GB. No data passes through this task, so this is nominal.
+`copyOut.timeout`|Int|12|Wall-time limit in hours
 
 
 ### Outputs
@@ -85,6 +98,8 @@ Output | Type | Description | Labels
 `summaryXlsx`|File|Run-level DUET summary metrics in Excel format|vidarr_label: summaryXlsx
 `multiqcReport`|File|MultiQC HTML report aggregating QC metrics across all pipeline steps|vidarr_label: multiqcReport
 `metricsDefinitions`|File|CSV file defining and describing each metric reported in the summary outputs|vidarr_label: metricsDefinitions
+`genomeZarr`|File|Joined Zarr store of genome methylation quantification, the archive downstream analysis reads|vidarr_label: genomeZarr
+`copiedManifest`|File?|The URI each result was copied to|
 
 
 ## Commands
@@ -148,6 +163,93 @@ This section lists command(s) run by biomodalDuetUltima workflow
         set -euo pipefail
 
         # ---------------------------------------------------------------------------
+        # 0. Which scheduler Nextflow submits its own jobs to. Resolved before any work
+        #    is done, so a setting the cluster cannot satisfy fails here rather than
+        #    hours later at the first process submission.
+        #      sge       Grid Engine. Needs the h_vmem clusterOptions and the qsub shim
+        #                in block 4: h_vmem is a per-slot limit, and the RSS directives
+        #                Nextflow generates from the memory directive re-impose the
+        #                cgroup kill those work around.
+        #      slurm     Slurm at a site that schedules its own partitions and accounts.
+        #      slurm-gcp Slurm on a cloud instance, where nodes are created on demand and
+        #                accounting is usually not enforced. Differs from slurm in its
+        #                defaults only; both generate the same executor settings.
+        #      auto      Decide from the submit command the cluster provides, then from
+        #                whether this node is a cloud instance.
+        # ---------------------------------------------------------------------------
+        SCHEDULER="~{scheduler}"
+
+        if [ "${SCHEDULER}" = "auto" ]; then
+            if command -v sbatch >/dev/null 2>&1; then
+                # The firmware identity of the machine: on a Google Compute Engine
+                # instance product_name reads "Google Compute Engine" and sys_vendor
+                # reads "Google". Both are plain local file reads that cost nothing off
+                # the cloud. Resolving the metadata hostname is NOT used as a signal:
+                # a resolver that answers wildcards returns the metadata address on a
+                # machine that is not an instance at all.
+                if grep -qi google /sys/class/dmi/id/product_name 2>/dev/null \
+                   || grep -qi google /sys/class/dmi/id/sys_vendor 2>/dev/null; then
+                    SCHEDULER=slurm-gcp
+                else
+                    SCHEDULER=slurm
+                fi
+            elif command -v qsub >/dev/null 2>&1; then
+                SCHEDULER=sge
+            else
+                echo "ERROR: scheduler=auto, but neither sbatch nor qsub is on PATH." >&2
+                echo "       Set the scheduler input to sge, slurm or slurm-gcp." >&2
+                exit 1
+            fi
+            echo "Detected scheduler: ${SCHEDULER}"
+        fi
+
+        SLURM_PARTITION="~{slurmPartition}"
+        SLURM_ONLY=()
+        [ -z "~{slurmPartition}" ]      || SLURM_ONLY+=("slurmPartition")
+        [ -z "~{slurmAccount}" ]        || SLURM_ONLY+=("slurmAccount")
+        [ -z "~{processBeforeScript}" ] || SLURM_ONLY+=("processBeforeScript")
+
+        case "${SCHEDULER}" in
+            sge)
+                PLATFORM_TYPE=sge
+                if ! command -v qsub >/dev/null 2>&1; then
+                    echo "ERROR: scheduler=sge, but qsub is not on PATH. Nextflow would have" >&2
+                    echo "       nothing to submit to. Set scheduler to slurm, slurm-gcp or auto." >&2
+                    exit 1
+                fi
+                # Ignored rather than refused, so one set of inputs can carry the slurm
+                # settings and still run where they do not apply.
+                if [ "${#SLURM_ONLY[@]}" -gt 0 ]; then
+                    echo "Note: $(IFS=,; echo "${SLURM_ONLY[*]}") ignored; those apply only to slurm"
+                fi
+                ;;
+            slurm|slurm-gcp)
+                PLATFORM_TYPE=slurm
+                if ! command -v sbatch >/dev/null 2>&1; then
+                    echo "ERROR: scheduler=${SCHEDULER}, but sbatch is not on PATH. Nextflow would" >&2
+                    echo "       have nothing to submit to. Set scheduler to sge or auto." >&2
+                    exit 1
+                fi
+                if [ -z "${SLURM_PARTITION}" ]; then
+                    if [ "${SCHEDULER}" = "slurm-gcp" ]; then
+                        # The general-purpose partition a cloud Slurm deployment ships.
+                        SLURM_PARTITION=compute
+                        echo "slurmPartition not set, using ${SLURM_PARTITION}"
+                    else
+                        echo "ERROR: scheduler=slurm requires slurmPartition. The pipeline's slurm" >&2
+                        echo "       profile names a queue that exists only at the vendor's own site," >&2
+                        echo "       so leaving it unset submits to a queue that is not there." >&2
+                        exit 1
+                    fi
+                fi
+                ;;
+            *)
+                echo "ERROR: scheduler must be sge, slurm, slurm-gcp or auto, got '${SCHEDULER}'" >&2
+                exit 1
+                ;;
+        esac
+
+        # ---------------------------------------------------------------------------
         # 1. Build a writable instance directory. The biomodal CLI needs writable
         #    copies of the two config files it rewrites, plus a real (symlink-free)
         #    pipelines/ tree -- Nextflow cannot follow symlinks for includeConfig
@@ -161,6 +263,28 @@ This section lists command(s) run by biomodalDuetUltima workflow
 
         cp -rL "$BIOMODAL_INSTANCE_DIR/pipelines" ./biomodal_instance/pipelines
         chmod -R u+w ./biomodal_instance/pipelines
+
+        # Scripts in the pipeline's bin/ are run by name rather than through an
+        # interpreter, so they need the execute bit -- and the copy does not always
+        # carry it, because a filesystem can report one fixed mode for every file it
+        # serves and refuse chmod outright. The installed tree is executable where it
+        # sits, so point at it rather than trying to fix a copy. Nothing writes to
+        # bin/, and it is not reached by includeConfig, which is the only reason the
+        # rest of the tree has to be a real copy.
+        # A script that cannot be executed fails LATE: the tool ahead of it exits 0
+        # and only the small file it was meant to write is missing, so the cost is
+        # the whole run rather than the step.
+        find ./biomodal_instance/pipelines -type d -name bin | while IFS= read -r d; do
+            orig="${BIOMODAL_INSTANCE_DIR}/${d#./biomodal_instance/}"
+            if [ -d "${orig}" ]; then
+                rm -rf "${d}"
+                ln -s "${orig}" "${d}"
+                echo "Linked bin to the installed tree: ${d} -> ${orig}"
+            else
+                echo "ERROR: no installed bin directory at ${orig}" >&2
+                exit 1
+            fi
+        done
 
         INSTANCE_DIR="$(pwd)/biomodal_instance"
 
@@ -225,7 +349,7 @@ PYEOF
             images_registry_location: ${BIOMODAL_IMAGES_DIR}
             nextflow_work_directory_location: $(pwd)/work
             reference_files_location: ${BIOMODAL_REF_DATA_DIR}
-            type: sge
+            type: ${PLATFORM_TYPE}
         pipelines:
             duet:
                 version: 1.7.0a1
@@ -237,6 +361,10 @@ CLIEOF
         # ---------------------------------------------------------------------------
         # 3. Append cluster runtime overrides to nextflow_override.config.
         # ---------------------------------------------------------------------------
+        # The reference bundle the pipeline reads:
+        # <reference_files_location>/<ref_pipeline_version>_<ref_genome>.
+        REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
+
 
         # 3a. Apptainer image lookup, so containers are reused rather than re-pulled:
         #       libraryDir -> the module's image set, read-only
@@ -246,11 +374,38 @@ CLIEOF
         #     module images always win and the staging dir just fills the gaps. Point
         #     cacheDir back at ${BIOMODAL_IMAGES_DIR} once the module ships every image.
         #     runOptions replaces the biomodal-shipped one: keep the $TMPDIR->/tmp
-        #     bind, force TMPDIR=/tmp inside the container, and bind the reference
-        #     data root. Nextflow only auto-mounts paths it knows are inputs, so
+        #     bind, force TMPDIR=/tmp inside the container, and bind every path the
+        #     run reads. Nextflow only auto-mounts paths it knows are inputs, so
         #     reference files passed to a tool as a plain path string are invisible
         #     inside the container without this.
-        IMAGES_STAGING_DIR="/.mounts/labs/gsi/src/biomodal/duet_ultima/images"
+        IMAGES_STAGING_DIR="~{imagesStagingDir}"
+        [ -n "${IMAGES_STAGING_DIR}" ] || IMAGES_STAGING_DIR="${BIOMODAL_IMAGES_DIR}"
+
+        # Bind points listed one by one rather than left to Nextflow, which derives
+        # its list from the paths a task touches and then collapses them into their
+        # common parents. Where the execution tree and the installed software sit
+        # under a single top-level directory, that directory is what gets bound, and
+        # if the image has its own copy the host's hides it -- every tool inside
+        # disappears. Naming the paths individually never collapses. Both the staged
+        # input path and what it resolves to are bound, because staging is by symlink
+        # and the container has to follow it.
+        {
+            pwd
+            echo "${BIOMODAL_INSTANCE_DIR}"
+            echo "${BIOMODAL_REF_DATA_DIR}"
+            for f in ~{sep=' ' crams} ~{sep=' ' craiList}; do
+                # Both resolved, so a bind is never a relative path.
+                readlink -f "$(dirname "${f}")"
+                dirname "$(readlink -f "${f}")"
+            done
+        } | sort -u > container_binds.txt
+
+        CONTAINER_BINDS=""
+        while IFS= read -r bind_dir; do
+            [ -n "${bind_dir}" ] || continue
+            CONTAINER_BINDS="${CONTAINER_BINDS} -B ${bind_dir}"
+        done < container_binds.txt
+        echo "Container bind points:${CONTAINER_BINDS}"
 
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
@@ -258,52 +413,234 @@ CLIEOF
 apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
-    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp -B ${BIOMODAL_REF_DATA_DIR}'
+    autoMounts = ~{containerAutoMounts}
+    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS=${CONTAINER_BINDS}'
 }
 NFEOF
 
-        # 3b. Literal Groovy block (no shell expansion). Appended last so it is the
-        #     final word on penv / clusterOptions, overriding any biomodal-shipped
-        #     process{} defaults.
-        #       - NUMBA_CACHE_DIR container env (required by this release).
-        #       - penv = 'smp'                       (UGE parallel-environment policy, 1.2)
-        #       - clusterOptions schedules on h_vmem  (cgroup memory-kill fix)
-        #         and retains -S /bin/bash + -P gsi   (UGE project-name policy)
+        # 3b. Settings that apply whichever scheduler runs the processes. Appended
+        #     after the section the biomodal CLI generates, so these are the final word
+        #     on any directive both set.
+        #       - NUMBA_CACHE_DIR container env (required by this release)
+        #       - time bounds every process, in a unit both executors understand
         cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
     containerOptions = '--env NUMBA_CACHE_DIR=/tmp/numba_cache'
+    time             = '~{maxTime}h'
 }
+NFEOF
+
+        # 3b-i. Executor settings, generated per run so nothing has to be placed on the
+        #       cluster to move the workflow between schedulers.
+        #       sge:   penv names the parallel environment; h_vmem is a PER-SLOT limit,
+        #              so the request is divided by the slot count before it is asked
+        #              for. Without that division a multi-slot process reserves its
+        #              whole memory figure on every slot and is refused or killed.
+        #       slurm: queue is the partition, and an account is sent only where the
+        #              site enforces accounting. The memory directive maps to --mem,
+        #              which is per job, so none of the sge arithmetic applies and the
+        #              qsub shim in block 4 is not needed either.
+        SLURM_CLUSTER_OPTIONS=""
+
+        if [ "${SCHEDULER}" = "sge" ]; then
+            cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
 
 process {
     penv           = 'smp'
-    time           = '~{maxTime}h'
     clusterOptions = { "-S /bin/bash -P gsi -l h_vmem=${task.memory.toMega().intdiv(task.cpus)}M" }
 }
 NFEOF
+        else
+            [ -z "~{slurmAccount}" ] || SLURM_CLUSTER_OPTIONS="--account=~{slurmAccount}"
 
-        # 3c. Clamp per-process cpus to what the cluster can schedule.
-        cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
+            # beforeScript runs on the host ahead of the container launch. Grid Engine
+            # always sets TMPDIR; Slurm does not, and the runOptions above bind it, so
+            # an unset value would bind an empty path and fail every process. The
+            # caller's script is appended rather than substituted, so a site that has to
+            # put its container runtime on PATH does not lose the guard.
+            # An image is unpacked into a sandbox and then run from there, so the directory
+            # has to allow execution as well as be writable. Each candidate is tested by
+            # running something from it rather than assumed, because what the schedulers
+            # offer differs. Bare /tmp is refused even where it works, since that is the
+            # path being mounted noexec as clusters are hardened. No single quotes below:
+            # the snippet is carried through a quoted shell string and a Groovy one.
+            SLURM_BEFORE='for d in "${TMP:-}" "${TMPDIR:-}" "${PWD}"; do
+  [ -n "$d" ] && [ "$d" != "/tmp" ] && [ -d "$d" ] && [ -w "$d" ] || continue
+  p=$(mktemp "$d/exectest.XXXXXX" 2>/dev/null) || continue
+  printf "#!/bin/sh\nexit 0\n" > "$p"
+  if chmod +x "$p" 2>/dev/null && "$p" 2>/dev/null; then rm -f "$p"; export TMPDIR="$d"; break; fi
+  rm -f "$p"
+done
+[ -n "${TMPDIR:-}" ] && [ "${TMPDIR}" != "/tmp" ] || { echo "ERROR: no writable directory that allows execution; set TMP to one" >&2; exit 1; }
+export SINGULARITY_TMPDIR="${TMPDIR}" APPTAINER_TMPDIR="${TMPDIR}"'
+            if [ -n "~{processBeforeScript}" ]; then
+                SLURM_BEFORE="${SLURM_BEFORE}
+~{processBeforeScript}"
+            fi
 
-process {
-    withName: 'PRELUDE'            { cpus = ~{maxCpus} }
-    withName: 'PRELUDE_ULTIMA'     { cpus = ~{maxCpus} }
-    withName: 'BIOMODAL_COLLAPSE'  { cpus = ~{maxCpus} }
-    withName: 'DEEPVARIANT_CALLER' { cpus = ~{maxCpus} }
-    withName: 'ULTIMA_DEDUP'           { cpus = ~{maxCpus} }
-    withName: 'MERGE_LANES_ULTIMA_DEDUP' { cpus = ~{maxCpus} }
-}
-NFEOF
-
-        if [ -n "~{additionalProfile}" ]; then
+            # Triple single quotes make a Groovy string with no interpolation, so the
+            # ${TMPDIR} above reaches the shell rather than Nextflow.
             cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 process {
-    withName: 'BWA_MEM2' { cpus = ~{maxCpus} }
-    withName: 'MUTECT2'  { cpus = ~{maxCpus} }
+    executor       = 'slurm'
+    queue          = '${SLURM_PARTITION}'
+    clusterOptions = '${SLURM_CLUSTER_OPTIONS}'
+    beforeScript   = '''${SLURM_BEFORE}'''
+}
+
+// The slurm profile points these at the vendor's own installation, where the sge
+// profile leaves them empty for the CLI to fill. Both have to be answered here so a
+// slurm run reads the reference bundle and writes its work tree in the right place.
+params {
+    data_path      = '$(pwd)'
+    work_path      = '$(pwd)/work'
+    reference_path = '${REFERENCE_PATH}'
 }
 NFEOF
         fi
+
+        # 3b-ii. A generic assignment does not reach a withName selector, so a directive
+        #        already set on one keeps the pipeline's value -- for clusterOptions that
+        #        is the other scheduler's syntax, which the submit command rejects. The
+        #        selectors are found rather than listed, so a pipeline upgrade that adds
+        #        one is covered without editing this file.
+        SEL_SCHEDULER="${SCHEDULER}" \
+        SEL_CLUSTER_OPTIONS="${SLURM_CLUSTER_OPTIONS}" \
+        SEL_TIME="~{maxTime}h" \
+        SEL_PIPELINE_DIR="${INSTANCE_DIR}/pipelines/duet/1.7.0a1" \
+        SEL_OVERRIDE_CONFIG="${INSTANCE_DIR}/nextflow_override.config" \
+        python3 << 'SELEOF'
+import os, pathlib, re
+
+override = pathlib.Path(os.environ["SEL_OVERRIDE_CONFIG"])
+pipeline_dir = pathlib.Path(os.environ["SEL_PIPELINE_DIR"])
+sources = [override.read_text()]
+sources += [f.read_text() for f in sorted(pipeline_dir.glob("*.config"))]
+sources += [f.read_text() for f in sorted(pipeline_dir.glob("conf/*.config"))]
+
+
+def selectors_setting(directive):
+    found = []
+    for src in sources:
+        for m in re.finditer(r"withName:\s*'([^']+)'\s*\{([^{}]*)\}", src, re.S):
+            if re.search(r"\b%s\s*=" % directive, m.group(2)) and m.group(1) not in found:
+                found.append(m.group(1))
+    return found
+
+
+per_selector = {}
+if os.environ["SEL_SCHEDULER"] != "sge":
+    for name in selectors_setting("clusterOptions"):
+        per_selector.setdefault(name, []).append(
+            "clusterOptions = '%s'" % os.environ["SEL_CLUSTER_OPTIONS"])
+for name in selectors_setting("time"):
+    per_selector.setdefault(name, []).append("time = '%s'" % os.environ["SEL_TIME"])
+
+if per_selector:
+    lines = ["", "process {"]
+    lines += ["    withName: '%s' { %s }" % (n, "; ".join(a))
+              for n, a in per_selector.items()]
+    lines += ["}", ""]
+    with override.open("a") as fh:
+        fh.write("\n".join(lines))
+    print("Replaced per-selector scheduler directives for: %s" % ", ".join(per_selector))
+SELEOF
+
+        # 3b-iii. Isolate named processes, either by sending them to a partition whose
+        #     nodes a single task fills, or by reserving a whole node where they already
+        #     are. The first is preferable where nodes are created on demand: an empty
+        #     node is a much harder allocation to satisfy than a partial one, so a
+        #     whole-node request can be refused where an ordinary one succeeds.
+        #     The generic clusterOptions is repeated inside each selector for the
+        #     whole-node form, because a selector REPLACES that setting rather than
+        #     adding to it, which would otherwise drop the accounting group.
+        if [ "${SCHEDULER}" != "sge" ]; then
+            EXCLUSIVE=(~{sep=' ' exclusiveProcesses})
+            if [ "${#EXCLUSIVE[@]}" -gt 0 ]; then
+                {
+                    echo ""
+                    echo "process {"
+                    for pname in "${EXCLUSIVE[@]}"; do
+                        if [ -n "~{exclusiveQueue}" ]; then
+                            echo "    withName: '${pname}' { queue = '~{exclusiveQueue}' }"
+                        else
+                            echo "    withName: '${pname}' { clusterOptions = '${SLURM_CLUSTER_OPTIONS} --exclusive' }"
+                        fi
+                    done
+                    echo "}"
+                    echo ""
+                } >> "${INSTANCE_DIR}/nextflow_override.config"
+                echo "Exclusive node requested for: ${EXCLUSIVE[*]}"
+            fi
+        fi
+
+        # 3c. Clamp per-process cpus to what the cluster can schedule. A process asking
+        #     for more cores than any node has is not slow, it is UNSUBMITTABLE: sbatch
+        #     refuses it with "CPU count per node can not be satisfied" and the run dies
+        #     wherever that process happens to sit in the graph. The requests are FOUND
+        #     rather than listed, because a hand-kept list silently misses whichever
+        #     process a profile or a pipeline upgrade raises next -- and a partition with
+        #     small nodes turns every one of those into a failure.
+        CLAMP_MAXCPUS="~{maxCpus}" \
+        CLAMP_PIPELINE_DIR="${INSTANCE_DIR}/pipelines/duet/1.7.0a1" \
+        CLAMP_OVERRIDE_CONFIG="${INSTANCE_DIR}/nextflow_override.config" \
+        python3 << 'CLAMPEOF'
+import os, pathlib, re
+
+maxcpus = int(os.environ["CLAMP_MAXCPUS"])
+pipeline_dir = pathlib.Path(os.environ["CLAMP_PIPELINE_DIR"])
+override = pathlib.Path(os.environ["CLAMP_OVERRIDE_CONFIG"])
+
+wanted = {}
+
+
+def biggest(expr):
+    """Largest core count a cpus request could resolve to, or None if unreadable.
+
+    A request is often a conditional rather than a number, so every integer in it
+    is a candidate and the largest is what has to fit on a node. Strings and
+    regexes are removed first: a genome or panel name carrying digits would
+    otherwise read as an enormous core count and clamp a small process for nothing.
+    """
+    expr = re.sub(r"\"[^\"]*\"|'[^']*'|/[^/\n]*/", " ", expr)
+    nums = [int(n) for n in re.findall(r"\b\d+\b", expr)]
+    return max(nums) if nums else None
+
+
+def note(name, expr):
+    value = biggest(expr)
+    if name not in wanted or (value is not None and (wanted[name] is None or value > wanted[name])):
+        wanted[name] = value
+
+
+for cfg in sorted(pipeline_dir.glob("*.config")) + sorted(pipeline_dir.glob("conf/*.config")):
+    for m in re.finditer(r"withName:\s*'([^']+)'\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", cfg.read_text(), re.S):
+        c = re.search(r"\bcpus\s*=\s*([^\n;]+)", m.group(2))
+        if c:
+            note(m.group(1), c.group(1))
+
+# Defaults on the process itself, which apply wherever no selector overrides them.
+for nf in sorted(pipeline_dir.glob("modules/*.nf")):
+    text = nf.read_text()
+    pm = re.search(r"^process\s+([A-Za-z_0-9]+)", text, re.M)
+    cm = re.search(r"^\s*cpus\s+([^\n/]+)", text, re.M)
+    if pm and cm:
+        note(pm.group(1), cm.group(1))
+
+over = sorted(n for n, v in wanted.items() if v is not None and v > maxcpus)
+unknown = sorted(n for n, v in wanted.items() if v is None)
+if over:
+    lines = ["", "process {"]
+    lines += ["    withName: '%s' { cpus = %d }" % (n, maxcpus) for n in over]
+    lines += ["}", ""]
+    with override.open("a") as fh:
+        fh.write("\n".join(lines))
+print("Clamped to %d cpus: %s" % (maxcpus, ", ".join(over) or "nothing over the limit"))
+if unknown:
+    print("Cpu request not readable, left alone: %s" % ", ".join(unknown))
+CLAMPEOF
 
         # 3d. Clamp per-process memory to maxMemory.
         #     BWA_MEM2 and the dedup steps are NOT in this list: they need more than
@@ -324,6 +661,28 @@ NFEOF
             echo "    withName: 'MERGE_LANES_ULTIMA_DEDUP' { memory = '~{dedupMemory}GB' }"
             echo "}"
         } >> "${INSTANCE_DIR}/nextflow_override.config"
+
+        # 3f. Retry a process that failed without saying why. A task killed along with
+        #     its node never reports an exit status, and Nextflow represents that absence
+        #     as Integer.MAX_VALUE rather than null -- so a policy testing only for
+        #     particular statuses falls through to terminate, and one lost node ends every
+        #     branch running beside it. Both forms of "no status" are retried here; a tool
+        #     that genuinely failed still terminates.
+        #     The wait between attempts is in MINUTES, not the milliseconds the shipped
+        #     policy uses. Where nodes are created on demand the usual reason a task is
+        #     lost is that one could not be built, and retrying a few milliseconds later
+        #     asks the same empty pool the same question. Doubling from two minutes, and
+        #     capped so a finalizer thread is never held for long, spans the minutes over
+        #     which capacity actually frees up.
+        cat >> "${INSTANCE_DIR}/nextflow_override.config" << 'NFEOF'
+
+process {
+    errorStrategy = { def wait = Math.min(Math.pow(2, task.attempt as int), 5d) as long
+                      sleep(wait * 60000L)
+                      return (task.exitStatus == null || task.exitStatus == Integer.MAX_VALUE || task.exitStatus in [0, 1, 10, 14]) ? 'retry' : 'terminate' }
+    maxRetries    = ~{processMaxRetries}
+}
+NFEOF
 
         # 3e. Enable tracing in the config, not on the command line: -with-trace is a
         #     Nextflow CLI option and the vendor CLI forwards only pipeline params.
@@ -350,14 +709,16 @@ timeline {
 NFEOF
 
         # ---------------------------------------------------------------------------
-        # 4. qsub shim (cgroup memory-kill fix).
-        #    clusterOptions above is CONCATENATED onto the s_rss/h_rss/mem_free
-        #    directives Nextflow's SGE executor generates from the memory directive;
-        #    those re-impose the cgroup RSS limit and must be stripped before qsub.
-        #    Install a wrapper named qsub earlier on PATH than the real one; it edits
-        #    each .command.run in place (next to the script, on NFS visible to exec
-        #    nodes) and re-submits to the real qsub.
+        # 4. qsub shim (cgroup memory-kill fix). Grid Engine only: it exists because
+        #    the clusterOptions above is CONCATENATED onto the s_rss/h_rss/mem_free
+        #    directives Nextflow's SGE executor generates from the memory directive,
+        #    and those re-impose the cgroup RSS limit and must be stripped before qsub.
+        #    Slurm's --mem carries no such companion directives, so nothing is wrapped
+        #    there. Install a wrapper named qsub earlier on PATH than the real one; it
+        #    edits each .command.run in place (next to the script, on shared storage
+        #    visible to exec nodes) and re-submits to the real qsub.
         # ---------------------------------------------------------------------------
+        if [ "${SCHEDULER}" = "sge" ]; then
         mkdir -p ./bin
         cat > ./bin/qsub << 'SHIMEOF'
 #!/bin/bash
@@ -386,12 +747,23 @@ fi
 SHIMEOF
         chmod +x ./bin/qsub
         export PATH="$(pwd)/bin:$PATH"
+        fi
 
         # ---------------------------------------------------------------------------
         # 5. Writable NXF_HOME, pre-seeded with the bundled Nextflow framework jar.
         # ---------------------------------------------------------------------------
         export NXF_HOME="$(pwd)/nxf_home"
-        export NXF_OPTS="-Xms512m -Xmx8g"
+        # -XX:-UseContainerSupport disables the JVM's cgroup probe, which throws a
+        # NullPointerException where a cgroup v2 hierarchy is present but exposes no
+        # controller the JDK recognises -- how a scheduler-created job cgroup can look.
+        # Nextflow reaches it while printing system information at startup, so the run
+        # dies before submitting any process. Disabling it is safe here: the flag only
+        # governs cgroup-derived defaults for heap size and processor count, and the
+        # heap is set explicitly above. Passed by two routes because NXF_OPTS reaches
+        # the JVM only if the launcher builds its command line from it, while
+        # JAVA_TOOL_OPTIONS is read by every JVM.
+        export NXF_OPTS="-Xms512m -Xmx8g -XX:-UseContainerSupport"
+        export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-XX:-UseContainerSupport"
         # Fully offline run: no network fetches at runtime.
         export NXF_OFFLINE=true
         # One line per event instead of an in-place ANSI progress block, which
@@ -463,12 +835,9 @@ SHIMEOF
         fi
 
         # ---------------------------------------------------------------------------
-        # 7. Run biomodal DUET in Ultima mode.
-        #    reference_path is <ref_data>/<ref_pipeline_version>_<ref_genome> =
-        #    ${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy 
+        # 7. Run biomodal DUET in Ultima mode. REFERENCE_PATH is set in block 3.
         # ---------------------------------------------------------------------------
         mkdir -p nf-results
-        REFERENCE_PATH="${BIOMODAL_REF_DATA_DIR}/1.1.0_GRCh38Decoy"
 
         # Fail fast if DeepVariant germline calling is requested but its Ultima model
         # is absent from the reference bundle.  Add the model under
@@ -595,6 +964,47 @@ SHIMEOF
         ln -s "$(find_one "${REPORTS}" -name "*Summary.xlsx")"             "${OUTPUT_PREFIX}.summary.xlsx"
         ln -s "$(find_one "${REPORTS}" -name "*multiqc_report.html")"      "${OUTPUT_PREFIX}.multiqc_report.html"
         ln -s "$(find_one "${REPORTS}" -name "*Metrics_Definitions.csv")"  "${OUTPUT_PREFIX}.metrics_definitions.csv"
+
+        # 8e. Joined Zarr store. This is the form downstream analysis reads -- an
+        #     archive aggregating the per-sample stores -- and it is published only
+        #     when the pipeline is asked to join them, which it is by default.
+        ZARR_STORE="${RESULTS_SUBDIR}/sample_outputs/zarr_store"
+        ln -s "$(find_one "${ZARR_STORE}" -name "*genome*.zarrz")" "${OUTPUT_PREFIX}.genome_zarr.zarrz"
+```
+```
+        set -euo pipefail
+
+        DEST="~{destination}/~{outputFileNamePrefix}"
+
+        command -v gcloud >/dev/null 2>&1 || {
+            echo "ERROR: gcloud is not on PATH, so the copy cannot be made." >&2
+            exit 1
+        }
+
+        # A file on a mounted object store is already IN the store. Naming it by its
+        # store URI leaves the data where it is and costs one API call; copying it by
+        # its mounted path would read and rewrite every byte through this node. Which
+        # store backs a mount is read from the mount table rather than assumed.
+        : > sources.txt
+        for f in ~{sep=' ' files}; do
+            real=$(readlink -f "${f}")
+            mnt=$(df --output=target "${real}" | tail -1)
+            store=$(mount | awk -v m=" ${mnt} " '$0 ~ m && /fuse/ {print $1; exit}')
+            if [ -z "${store}" ]; then
+                echo "ERROR: ${real} is not on a mounted object store, so it has no URI." >&2
+                echo "       Copy it another way, or leave outputDestination empty." >&2
+                exit 1
+            fi
+            echo "gs://${store}${real#${mnt}}" >> sources.txt
+        done
+
+        echo "Copying $(wc -l < sources.txt) file(s) to ${DEST}/"
+        # Read into an array rather than piping: the destination has to come last.
+        mapfile -t SOURCES < sources.txt
+        gcloud storage cp "${SOURCES[@]}" "${DEST}/"
+
+        sed "s|.*/|${DEST}/|" sources.txt > "~{outputFileNamePrefix}.copied.txt"
+        cat "~{outputFileNamePrefix}.copied.txt"
 ```
 
 ## Support

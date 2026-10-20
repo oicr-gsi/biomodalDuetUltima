@@ -2,6 +2,10 @@
     {
         "arguments": {
             "biomodalDuetUltima.additionalProfile": "",
+            "biomodalDuetUltima.containerAutoMounts": null,
+            "biomodalDuetUltima.copyOut.jobMemory": null,
+            "biomodalDuetUltima.copyOut.modules": null,
+            "biomodalDuetUltima.copyOut.timeout": null,
             "biomodalDuetUltima.craiIndexes": null,
             "biomodalDuetUltima.crams": [
                 {
@@ -17,9 +21,14 @@
                     "type": "EXTERNAL"
                 }
             ],
+            "biomodalDuetUltima.exclusiveProcesses": null,
+            "biomodalDuetUltima.exclusiveQueue": null,
+            "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputDestination": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_01",
+            "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
             "biomodalDuetUltima.runDuet.callGermlineVariants": false,
@@ -35,11 +44,15 @@
             "biomodalDuetUltima.runDuet.maxTime": null,
             "biomodalDuetUltima.runDuet.meanQualityR1": null,
             "biomodalDuetUltima.runDuet.meanQualityR2": null,
+            "biomodalDuetUltima.runDuet.processMaxRetries": null,
             "biomodalDuetUltima.runDuet.splitReadsPreResolution": null,
             "biomodalDuetUltima.runDuet.timeout": null,
             "biomodalDuetUltima.runDuet.variantCaller": null,
             "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
             "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.scheduler": null,
+            "biomodalDuetUltima.slurmAccount": null,
+            "biomodalDuetUltima.slurmPartition": null,
             "biomodalDuetUltima.splitCram.cores": null,
             "biomodalDuetUltima.splitCram.ioSlots": null,
             "biomodalDuetUltima.splitCram.jobMemory": null,
@@ -53,7 +66,7 @@
         },
         "id": "biomodalDuetUltima_test_01",
         "metadata": {
-            "biomodalDuetUltima.outputBam": {
+            "biomodalDuetUltima.copiedManifest": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -61,7 +74,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.outputBai": {
+            "biomodalDuetUltima.genomeZarr": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -101,6 +114,14 @@
                 ],
                 "type": "ALL"
             },
+            "biomodalDuetUltima.metricsDefinitions": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
             "biomodalDuetUltima.modc_cxreport": {
                 "contents": [
                     {
@@ -117,7 +138,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.vcf": {
+            "biomodalDuetUltima.multiqcReport": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -125,7 +146,15 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.vcfIndex": {
+            "biomodalDuetUltima.outputBai": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.outputBam": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -157,7 +186,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.multiqcReport": {
+            "biomodalDuetUltima.vcf": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -165,7 +194,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.metricsDefinitions": {
+            "biomodalDuetUltima.vcfIndex": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_01_@JENKINSID@"
@@ -186,6 +215,10 @@
     {
         "arguments": {
             "biomodalDuetUltima.additionalProfile": "",
+            "biomodalDuetUltima.containerAutoMounts": null,
+            "biomodalDuetUltima.copyOut.jobMemory": null,
+            "biomodalDuetUltima.copyOut.modules": null,
+            "biomodalDuetUltima.copyOut.timeout": null,
             "biomodalDuetUltima.craiIndexes": null,
             "biomodalDuetUltima.crams": [
                 {
@@ -201,9 +234,14 @@
                     "type": "EXTERNAL"
                 }
             ],
+            "biomodalDuetUltima.exclusiveProcesses": null,
+            "biomodalDuetUltima.exclusiveQueue": null,
+            "biomodalDuetUltima.imagesStagingDir": null,
             "biomodalDuetUltima.mode": "6bp",
             "biomodalDuetUltima.modules": null,
+            "biomodalDuetUltima.outputDestination": null,
             "biomodalDuetUltima.outputFileNamePrefix": "biomodalDuetUltima_test_02",
+            "biomodalDuetUltima.processBeforeScript": null,
             "biomodalDuetUltima.runDuet.backQualityTrim": null,
             "biomodalDuetUltima.runDuet.bwaMem2Memory": null,
             "biomodalDuetUltima.runDuet.callGermlineVariants": false,
@@ -219,11 +257,15 @@
             "biomodalDuetUltima.runDuet.maxTime": null,
             "biomodalDuetUltima.runDuet.meanQualityR1": null,
             "biomodalDuetUltima.runDuet.meanQualityR2": null,
+            "biomodalDuetUltima.runDuet.processMaxRetries": null,
             "biomodalDuetUltima.runDuet.splitReadsPreResolution": null,
             "biomodalDuetUltima.runDuet.timeout": null,
             "biomodalDuetUltima.runDuet.variantCaller": null,
             "biomodalDuetUltima.runName": "biomodalDuetUltima_test",
             "biomodalDuetUltima.sampleId": "46433161-Z0001-subsample",
+            "biomodalDuetUltima.scheduler": null,
+            "biomodalDuetUltima.slurmAccount": null,
+            "biomodalDuetUltima.slurmPartition": null,
             "biomodalDuetUltima.splitCram.cores": null,
             "biomodalDuetUltima.splitCram.ioSlots": null,
             "biomodalDuetUltima.splitCram.jobMemory": null,
@@ -237,7 +279,7 @@
         },
         "id": "biomodalDuetUltima_test_02",
         "metadata": {
-            "biomodalDuetUltima.outputBam": {
+            "biomodalDuetUltima.copiedManifest": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
@@ -245,7 +287,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.outputBai": {
+            "biomodalDuetUltima.genomeZarr": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
@@ -285,6 +327,14 @@
                 ],
                 "type": "ALL"
             },
+            "biomodalDuetUltima.metricsDefinitions": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
             "biomodalDuetUltima.modc_cxreport": {
                 "contents": [
                     {
@@ -301,7 +351,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.vcf": {
+            "biomodalDuetUltima.multiqcReport": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
@@ -309,7 +359,15 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.vcfIndex": {
+            "biomodalDuetUltima.outputBai": {
+                "contents": [
+                    {
+                        "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
+                    }
+                ],
+                "type": "ALL"
+            },
+            "biomodalDuetUltima.outputBam": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
@@ -341,7 +399,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.multiqcReport": {
+            "biomodalDuetUltima.vcf": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
@@ -349,7 +407,7 @@
                 ],
                 "type": "ALL"
             },
-            "biomodalDuetUltima.metricsDefinitions": {
+            "biomodalDuetUltima.vcfIndex": {
                 "contents": [
                     {
                         "outputDirectory": "@SCRATCH@/@DATE@_Workflow_biomodalDuetUltima_test_02_@JENKINSID@"
