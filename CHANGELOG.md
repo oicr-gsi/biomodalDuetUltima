@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-11-10
+### Fixed
+- `scheduler` now defaults to `auto`, so a run resolves the scheduler from the submit
+  command the cluster provides instead of assuming Grid Engine. One set of inputs then
+  runs on either cluster, which is what the regression test needs.
+
 ## [1.2.1] - 2026-10-16
 ### Fixed
 - Unpack container images somewhere that allows execution. The shared temporary directory

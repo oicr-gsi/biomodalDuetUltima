@@ -11,7 +11,7 @@ workflow biomodalDuetUltima {
         String modules = "biomodal-duet-ultima/1.7.0a1 samtools/1.16.1"
         Int splitCramReads = -1
         Array[File]? craiIndexes
-        String scheduler = "sge"
+        String scheduler = "auto"
         String slurmPartition = ""
         String slurmAccount = ""
         String processBeforeScript = ""
@@ -32,7 +32,7 @@ workflow biomodalDuetUltima {
         modules: "Environment module providing the biomodal instance dir and its env vars (apptainer loads as a dependency)"
         craiIndexes: "Optional pre-built .crai, one per entry of crams, matched by basename. Used only when splitCram does not run; supply it when re-running against parts an earlier splitCram produced, to skip re-indexing."
         splitCramReads: "If >0, split the single input CRAM into parts of this many reads and present them to the pipeline as separate lanes, so PRELUDE and BWA_MEM2 run per part in parallel. Faster than the pipeline's own split_reads_pre_resolution, which converts CRAM to FASTQ first. Requires exactly one input CRAM. Default -1 (off)."
-        scheduler: "Which scheduler Nextflow submits its own jobs to: sge, slurm, slurm-gcp, or auto to decide from the submit command the cluster provides and whether the node is a cloud instance. slurm-gcp differs from slurm only in its defaults. Default sge."
+        scheduler: "Which scheduler Nextflow submits its own jobs to: sge, slurm, slurm-gcp, or auto to decide from the submit command the cluster provides and whether the node is a cloud instance. slurm-gcp differs from slurm only in its defaults. Default auto."
         slurmPartition: "Partition Nextflow submits its own jobs to. Required when scheduler is slurm, because the pipeline's slurm profile names a queue that exists only at the vendor's own site. Defaults to compute under slurm-gcp."
         slurmAccount: "Accounting group for the jobs Nextflow submits, where the site enforces one. Ignored under sge."
         processBeforeScript: "Script run on the host before every Nextflow process, for a site that has to put its container runtime on PATH. Appended to the settings the task makes itself rather than replacing them. Ignored under sge."
@@ -305,7 +305,7 @@ task runDuet {
         String outputFileNamePrefix
         String mode
         String additionalProfile
-        String scheduler = "sge"
+        String scheduler = "auto"
         String slurmPartition = ""
         String slurmAccount = ""
         String processBeforeScript = ""
