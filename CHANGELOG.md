@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-11-10
+### Fixed
+- Carry the container runtime's temporary directory in by a wrapper placed on `PATH`.
+  Nextflow launches the container with the environment cleared except for `PATH`, so
+  exporting the setting from the process script left the runtime on its built-in default
+  and an image unpacked onto a noexec mount still failed with
+  `fork/exec /bin/bash: permission denied`.
+
 ## [1.2.2] - 2026-11-10
 ### Fixed
 - `scheduler` now defaults to `auto`, so a run resolves the scheduler from the submit
