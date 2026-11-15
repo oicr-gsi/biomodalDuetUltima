@@ -96,14 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Unpack container images somewhere that allows execution. The shared temporary directory
-  is mounted noexec on some clusters, where unpacking succeeds and the first command
-  inside the container fails. Each candidate is tested by running something from it, bare
-  `/tmp` is refused, and a run where none is usable stops with that reason. The setting is
-  carried in by a wrapper placed on `PATH`, because Nextflow launches the container with
-  the environment cleared except for `PATH`, which leaves an export from the process
-  script invisible to the runtime. `processBeforeScript` is appended to that guard rather
-  than replacing it, so a site that has to put its container runtime on PATH keeps both.
+- `TMPDIR` is given a value for the Nextflow processes, since the container run options
+  bind it. Nothing is done about where the runtime would unpack an image: apptainer mounts
+  a SIF rather than unpacking it wherever squashfuse is installed, so the directory it
+  would have unpacked into does not matter.
 - The pipeline's `bin/` directory is linked to the installed tree rather than copied. Its
   scripts are invoked by name rather than through an interpreter, so they need the execute
   bit -- and a copy does not always carry it, because a filesystem can report one fixed
