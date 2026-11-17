@@ -96,10 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `TMPDIR` is given a value for the Nextflow processes, since the container run options
-  bind it. Nothing is done about where the runtime would unpack an image: apptainer mounts
-  a SIF rather than unpacking it wherever squashfuse is installed, so the directory it
-  would have unpacked into does not matter.
+- The workflow no longer steers where the container runtime unpacks an image, nor runs
+  anything of its own before a Nextflow process. Apptainer mounts a SIF rather than
+  unpacking it, so the directory it would have unpacked into does not arise, and the
+  temporary directory bound into the container carries its own default where the bind is
+  written. `beforeScript` is emitted only for the caller's `processBeforeScript`.
 - The pipeline's `bin/` directory is linked to the installed tree rather than copied. Its
   scripts are invoked by name rather than through an interpreter, so they need the execute
   bit -- and a copy does not always carry it, because a filesystem can report one fixed

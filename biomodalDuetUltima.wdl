@@ -629,7 +629,7 @@ apptainer {
     libraryDir = "${BIOMODAL_IMAGES_DIR}"
     cacheDir   = "${IMAGES_STAGING_DIR}"
     autoMounts = ~{containerAutoMounts}
-    runOptions = '--bind "\$TMPDIR:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS=${CONTAINER_BINDS}'
+    runOptions = '--bind "\${TMPDIR:-/tmp}:/tmp" --env TMPDIR=/tmp --env JAVA_TOOL_OPTIONS=${CONTAINER_BINDS}'
 }
 NFEOF
 
@@ -674,26 +674,21 @@ NFEOF
             # an unset value would bind an empty path and fail every process. The
             # caller's script is appended rather than substituted, so a site that has to
             # put its container runtime on PATH does not lose the guard.
-            # TMPDIR is bound into the container by the run options above, so it has to
-            # have a value; Grid Engine and slurm both provide a per-job directory, and a
-            # cloud node that provides neither falls back to /tmp. Nothing is done about
-            # where the runtime would unpack an image, because apptainer mounts a SIF
-            # instead of unpacking it wherever squashfuse is installed.
-            SLURM_BEFORE='export TMPDIR="${TMP:-${TMPDIR:-/tmp}}"'
+            # Nothing of ours runs before a process. The temporary directory the run
+            # options bind carries its own default where it is used, and where the image
+            # is unpacked does not arise: apptainer mounts a SIF instead of unpacking it.
+            SLURM_BEFORE_LINE=""
             if [ -n "~{processBeforeScript}" ]; then
-                SLURM_BEFORE="${SLURM_BEFORE}
-~{processBeforeScript}"
+                SLURM_BEFORE_LINE="    beforeScript   = '''~{processBeforeScript}'''"
             fi
 
-            # Triple single quotes make a Groovy string with no interpolation, so the
-            # ${TMPDIR} above reaches the shell rather than Nextflow.
             cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 
 process {
     executor       = 'slurm'
     queue          = '${SLURM_PARTITION}'
     clusterOptions = '${SLURM_CLUSTER_OPTIONS}'
-    beforeScript   = '''${SLURM_BEFORE}'''
+${SLURM_BEFORE_LINE}
 }
 
 // The slurm profile points these at the vendor's own installation, where the sge
