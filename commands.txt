@@ -355,13 +355,15 @@ NFEOF
             # an unset value would bind an empty path and fail every process. The
             # caller's script is appended rather than substituted, so a site that has to
             # put its container runtime on PATH does not lose the guard.
-            # Nothing of ours runs before a process. The temporary directory the run
-            # options bind carries its own default where it is used, and where the image
-            # is unpacked does not arise: apptainer mounts a SIF instead of unpacking it.
-            SLURM_BEFORE_LINE=""
-            if [ -n "~{processBeforeScript}" ]; then
-                SLURM_BEFORE_LINE="    beforeScript   = '''~{processBeforeScript}'''"
-            fi
+            # Emitted even when empty, which is the point: the instance config sets a
+            # beforeScript that puts one named build of the container runtime at the front
+            # of PATH, and the path it names is tied to the OS the instance was configured
+            # on. On another one that is the wrong tree, and where the site grants the
+            # unprivileged namespace per binary it is a build without the grant, so every
+            # process is refused. The module's own dependency already puts the right one
+            # on PATH. A generic assignment here replaces that one, since this file is
+            # read last.
+            SLURM_BEFORE_LINE="    beforeScript   = '''~{processBeforeScript}'''"
 
             cat >> "${INSTANCE_DIR}/nextflow_override.config" << NFEOF
 

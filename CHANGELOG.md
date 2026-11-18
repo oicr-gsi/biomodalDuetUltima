@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The instance config's `beforeScript` is replaced rather than left in place. It puts one
+  named build of the container runtime at the front of `PATH`, and the path it names is
+  tied to the OS the instance was configured on; on another one that is the wrong tree,
+  and where the site grants the unprivileged namespace per binary it is a build without
+  the grant, so every process is refused with `Failed to create container process`. The
+  module's own dependency already provides the right build.
 - The workflow no longer steers where the container runtime unpacks an image, nor runs
   anything of its own before a Nextflow process. Apptainer mounts a SIF rather than
   unpacking it, so the directory it would have unpacked into does not arise, and the
